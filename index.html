@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>Qalc！</title>
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>ケイサンアタック！ - おんたまドリル</title>
   
   <!-- CSS & Icons -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
-  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;900&display=swap" rel="stylesheet">
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -25,13 +25,12 @@
 
   <style>
     body { 
-      font-family: 'Zen Maru Gothic', sans-serif; 
+      font-family: 'M PLUS Rounded 1c', sans-serif; 
       touch-action: manipulation; 
-      transition: background-color 0.3s ease; 
       overflow: hidden; 
       background-color: var(--bg);
       color: var(--text);
-      /* 方眼紙ノート風の背景 */
+      /* 格子柄（方眼紙）の背景 */
       background-image: 
         linear-gradient(var(--border) 1px, transparent 1px),
         linear-gradient(90deg, var(--border) 1px, transparent 1px);
@@ -110,6 +109,19 @@
       box-shadow: 0 0 0 var(--border);
       background-color: var(--border);
     }
+
+    .progress-bar-striped {
+      background-image: linear-gradient(45deg, rgba(255,255,255,.15) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.15) 50%, rgba(255,255,255,.15) 75%, transparent 75%, transparent);
+      background-size: 1rem 1rem;
+    }
+
+    /* ローディングアニメーション */
+    @keyframes bounceChar { from { transform: translateY(0); } to { transform: translateY(-20px); } }
+    .animate-bounce-char { animation: bounceChar 0.6s infinite alternate cubic-bezier(0.5, 0.05, 1, 0.5); }
+    @keyframes shadowPulse { from { transform: scale(1); opacity: 1; } to { transform: scale(0.6); opacity: 0.5; } }
+    .animate-shadow-pulse { animation: shadowPulse 0.6s infinite alternate cubic-bezier(0.5, 0.05, 1, 0.5); }
+    @keyframes rotateOrbit { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .animate-orbit { animation: rotateOrbit 3s linear infinite; }
   </style>
 </head>
 <body>
@@ -120,6 +132,11 @@
     const { motion, AnimatePresence } = window.Motion;
 
     const R = ({ c, r }) => <ruby>{c}<rt>{r}</rt></ruby>;
+
+    // 安全なConfetti呼び出し
+    const triggerConfetti = (options) => {
+      if (window.confetti) window.confetti(options);
+    };
 
     // ==========================================
     // 1. サウンド & ハプティック エンジン
@@ -148,8 +165,6 @@
             this.vibrate([100, 50, 100]); break;
           case 'finish':
             osc.type = 'triangle'; osc.frequency.setValueAtTime(440, t); osc.frequency.setValueAtTime(880, t + 0.3); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.001, t + 1.0); osc.start(t); osc.stop(t + 1.0); break;
-          case 'coin':
-            osc.type = 'sine'; osc.frequency.setValueAtTime(1200, t); osc.frequency.setValueAtTime(1600, t + 0.1); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.01, t + 0.3); osc.start(t); osc.stop(t + 0.3); break;
         }
       }
       playBGM(type) {
@@ -259,36 +274,11 @@
       return p;
     };
 
-    const SHOP_ITEMS = {
-      bases: [
-        { id: 'b_dog', char: '🐶', name: 'イヌ', price: 0 }, { id: 'b_cat', char: '🐱', name: 'ネコ', price: 200 },
-        { id: 'b_frog', char: '🐸', name: 'カエル', price: 250 }, { id: 'b_bear', char: '🐻', name: 'クマ', price: 300 },
-        { id: 'b_alien', char: '👽', name: 'うちゅうじん', price: 800 }, { id: 'b_dragon', char: '🐉', name: 'ドラゴン', price: 1000 }
-      ],
-      hats: [
-        { id: 'h_cap', char: '🧢', name: 'キャップ', price: 150 }, { id: 'h_crown', char: '👑', name: 'おうかん', price: 500 },
-        { id: 'h_star', char: '🌟', name: '星', price: 200 }, { id: 'h_idea', char: '💡', name: 'ひらめき', price: 200 }
-      ],
-      faces: [
-        { id: 'f_glass', char: '🕶️', name: 'サングラス', price: 200 }, { id: 'f_sparkle', char: '✨', name: 'きらきら', price: 200 },
-        { id: 'f_flower', char: '💮', name: 'はなまる', price: 200 }
-      ],
-      props: [
-        { id: 'p_pencil', char: '✏️', name: 'えんぴつ', price: 100 }, { id: 'p_game', char: '🎮', name: 'ゲーム', price: 400 },
-        { id: 'p_rocket', char: '🚀', name: 'ロケット', price: 800 }, { id: 'p_trophy', char: '🏆', name: 'トロフィー', price: 1000 }
-      ],
-      themes: [
-        { id: 'default', name: 'ナチュラル (しろ)', price: 0 }, { id: 'dark', name: 'よる (ネイビー)', price: 1000 },
-        { id: 'sakura', name: 'さくら (ピンク)', price: 1000 }, { id: 'ocean', name: 'うみ (ブルー)', price: 1000 },
-        { id: 'forest', name: 'もり (グリーン)', price: 1000 }, { id: 'choco', name: 'チョコ (ブラウン)', price: 1000 }
-      ]
-    };
-
     const MISSION_POOL = [
       { id: 'p1', type: 'play', target: 1, reward: 20, desc: '今日 1回 プレイ' },
       { id: 'p3', type: 'play', target: 3, reward: 50, desc: '今日 3回 プレイ' },
       { id: 'c10', type: 'combo', target: 10, reward: 50, desc: '1プレイで 10コンボ' },
-      { id: 's1000', type: 'score', target: 1000, reward: 100, desc: '1プレイで 1000pt' },
+      { id: 's1000', type: 'score', target: 1000, reward: 100, desc: 'ゲーム内で 1000pt' },
       { id: 'ta1', type: 'play_time_attack', target: 1, reward: 30, desc: 'タイムアタックをプレイ' },
       { id: 'sd1', type: 'play_sudden_death', target: 1, reward: 30, desc: 'サドンデスをプレイ' }
     ];
@@ -303,15 +293,14 @@
     const StorageAPI = {
       safeGet: (key, fallback = null) => { try { const v = window.localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } },
       safeSet: (key, val) => { try { window.localStorage.setItem(key, JSON.stringify(val)); return true; } catch (e) { return false; } },
+      
       getStats: () => {
         let stats = StorageAPI.safeGet('qalc_stats');
-        if (!stats || !stats.inventory) {
+        if (!stats) {
           stats = {
-            totalExp: parseInt(window.localStorage.getItem('qalc_exp') || '0', 10),
             streak: parseInt(window.localStorage.getItem('qalc_streak') || '0', 10),
             lastDate: window.localStorage.getItem('qalc_last_date') || '',
-            coins: 100, inventory: { bases: ['b_dog'], hats: [], faces: [], props: [], themes: ['default'] },
-            equipped: { base: 'b_dog', hat: null, face: null, prop: null }, theme: 'default', missions: null, daily: {}
+            missions: null, daily: {}
           };
         }
         const todayStr = new Date().toLocaleDateString();
@@ -319,10 +308,10 @@
         StorageAPI.safeSet('qalc_stats', stats); return stats;
       },
       saveStats: (stats) => StorageAPI.safeSet('qalc_stats', stats),
-      updateDailyAndMissions: (stats, exp, combo, playCount, gameMode, correctCount) => {
+      updateDailyAndMissions: (stats, gameScore, combo, playCount, gameMode, correctCount) => {
         const today = new Date().toLocaleDateString();
-        if (!stats.daily) stats.daily = {}; if (!stats.daily[today]) stats.daily[today] = { exp: 0, count: 0 };
-        stats.daily[today].exp += exp; stats.daily[today].count += playCount; stats.totalExp = (stats.totalExp || 0) + exp;
+        if (!stats.daily) stats.daily = {}; if (!stats.daily[today]) stats.daily[today] = { count: 0 };
+        stats.daily[today].count += playCount;
 
         if (stats.lastDate !== today) {
           if (stats.lastDate) {
@@ -336,7 +325,7 @@
           stats.missions.list.forEach(m => {
             if (m.type === 'play' && !m.claimed) m.current += playCount;
             if (m.type === 'combo' && !m.claimed && combo > m.current) m.current = combo;
-            if (m.type === 'score' && !m.claimed && exp > m.current) m.current = exp;
+            if (m.type === 'score' && !m.claimed && gameScore > m.current) m.current = gameScore;
             if (m.type === 'play_time_attack' && gameMode === 'TIME_ATTACK' && !m.claimed) m.current += playCount;
             if (m.type === 'play_sudden_death' && gameMode === 'SUDDEN_DEATH' && !m.claimed) m.current += playCount;
           });
@@ -387,7 +376,7 @@
           <AnimatePresence>
             {toasts.map(t => (
               <motion.div key={t.id} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[var(--panel)] border-2 border-[var(--border)] text-[var(--text)] px-4 py-3 rounded-2xl shadow-sm flex items-center gap-3 font-bold text-sm">
-                <i className={`bi ${t.icon==='error'?'bi-heartbreak text-[var(--primary)]':'bi-check-circle-fill text-[var(--secondary)]'} text-2xl`}></i>
+                <i className={`bi ${t.icon==='error'?'bi-heartbreak text-red-500':'bi-check-circle-fill text-green-500'} text-2xl`}></i>
                 <span>{t.title}</span>
               </motion.div>
             ))}
@@ -395,25 +384,6 @@
         </div>
       );
     };
-
-    const getLevelInfo = (exp) => {
-      const level = Math.floor(Math.cbrt(exp / 200)) + 1; const curr = 200 * Math.pow(level - 1, 3); const next = 200 * Math.pow(level, 3);
-      const prog = ((exp - curr) / (next - curr)) * 100;
-      const r = [{ m: 100, t: "計算神", b: "🌌", c: "var(--text)" }, { m: 50, t: "マスター", b: "👑", c: "var(--accent)" }, { m: 20, t: "上級", b: "🥇", c: "var(--accent)" }, { m: 0, t: "かけだし", b: "🌱", c: "var(--secondary)" }].find(x => level >= x.m);
-      return { level, title: r.t, badge: r.b, color: r.c, progress: prog, nextLevelExp: next };
-    };
-
-    const LayeredAvatar = React.memo(({ equipped, size = "text-5xl" }) => {
-      const getC = (cat, id) => { const i = SHOP_ITEMS[cat].find(x => x.id === id); return i ? i.char : null; };
-      return (
-        <div className={`relative flex items-center justify-center aspect-square ${size}`}>
-          <span className="absolute z-10 drop-shadow-sm">{getC('bases', equipped.base) || '🐶'}</span>
-          {equipped.face && <span className="absolute z-20 text-[0.8em] top-[15%] drop-shadow-sm">{getC('faces', equipped.face)}</span>}
-          {equipped.hat && <span className="absolute z-30 text-[0.8em] -top-[25%] -rotate-12 drop-shadow-sm">{getC('hats', equipped.hat)}</span>}
-          {equipped.prop && <span className="absolute z-40 text-[0.7em] -bottom-[10%] -right-[10%] rotate-12 drop-shadow-sm">{getC('props', equipped.prop)}</span>}
-        </div>
-      );
-    });
 
     const PageWrapper = ({ children, keyName }) => (
       <motion.div key={keyName} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{duration: 0.2}} className="absolute inset-0 flex flex-col overflow-y-auto p-4 no-scrollbar">
@@ -483,36 +453,45 @@
       }, []); return l;
     };
 
+    const Loading = () => (
+      <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--bg)]">
+        <div className="relative w-32 h-32 flex justify-center items-center mb-4">
+          <div className="absolute w-full h-full animate-orbit">
+            <div className="absolute w-8 h-8 bg-[var(--panel)] border-2 border-[var(--border)] rounded-full flex items-center justify-center font-black text-xl text-[var(--primary)] shadow-sm top-0 left-1/2 -translate-x-1/2 -translate-y-1/2">+</div>
+            <div className="absolute w-8 h-8 bg-[var(--panel)] border-2 border-[var(--border)] rounded-full flex items-center justify-center font-black text-xl text-[var(--accent)] shadow-sm bottom-0 left-1/2 -translate-x-1/2 translate-y-1/2">-</div>
+            <div className="absolute w-8 h-8 bg-[var(--panel)] border-2 border-[var(--border)] rounded-full flex items-center justify-center font-black text-xl text-[var(--secondary)] shadow-sm top-1/2 left-0 -translate-x-1/2 -translate-y-1/2">×</div>
+            <div className="absolute w-8 h-8 bg-[var(--panel)] border-2 border-[var(--border)] rounded-full flex items-center justify-center font-black text-xl text-[var(--text)] shadow-sm top-1/2 right-0 translate-x-1/2 -translate-y-1/2">÷</div>
+          </div>
+          <div className="text-[var(--primary)] animate-bounce-char z-10 -mt-2"><i className="bi bi-calculator-fill text-6xl"></i></div>
+          <div className="absolute bottom-5 w-12 h-2.5 bg-black/10 rounded-full animate-shadow-pulse"></div>
+        </div>
+        <h3 className="text-[var(--primary)] font-black tracking-widest animate-pulse mt-4">NOW LOADING...</h3>
+      </div>
+    );
+
     // ==========================================
     // 4. 各画面 View コンポーネント
     // ==========================================
-    const HomeView = ({ setView, stats, setStats, setConfigMode, initHost }) => {
-      const { level, title, badge, color, progress, nextLevelExp } = getLevelInfo(stats.totalExp);
+    const HomeView = ({ setView, stats, setStats, setConfigMode, initHost, addGlobalScore }) => {
       const claim = (id) => {
         let n = { ...stats }; const m = n.missions.list.find(x => x.id === id);
-        if (m && m.current >= m.target && !m.claimed) { audioCtrl.playSE('coin'); m.claimed = true; n.coins += m.reward; StorageAPI.saveStats(n); setStats(n); showToast('success', `${m.reward}コインゲット！`); }
+        if (m && m.current >= m.target && !m.claimed) { 
+          audioCtrl.playSE('correct'); 
+          m.claimed = true; 
+          addGlobalScore(m.reward);
+          StorageAPI.saveStats(n); 
+          setStats(n); 
+          showToast('success', `スコアを ${m.reward} ゲット！`); 
+        }
       };
+
       return (
-        <div className="flex flex-col items-center gap-4 pb-10">
-          <div className="text-center mt-2 mb-2">
-            <h2 className="font-black text-5xl tracking-widest text-[var(--text)]">Qalc<span className="text-[var(--primary)]">.</span></h2>
-          </div>
-          <div className="w-full card-pop p-5 relative">
-            <div className="absolute top-3 right-3 flex items-center gap-1 font-bold text-sm bg-[var(--panel)] px-3 py-1 rounded-full border-2 border-[var(--border)] text-[var(--text)]"><i className="bi bi-coin text-[var(--accent)]"></i> {stats.coins}</div>
-            <div className="flex items-center gap-4 mt-2">
-              <div className="bg-[var(--bg)] rounded-2xl w-[80px] h-[80px] border-2 border-[var(--border)] overflow-hidden"><LayeredAvatar equipped={stats.equipped} /></div>
-              <div className="flex-grow">
-                <div className="text-xs font-bold opacity-70 mb-1"><span style={{ color }}>{badge} {title}</span></div>
-                <div className="text-3xl font-black tracking-wide text-[var(--text)]">Lv.{level}</div>
-              </div>
-            </div>
-            <div className="w-full mt-4 h-3 bg-[var(--bg)] rounded-full overflow-hidden border border-[var(--border)]">
-              <motion.div initial={{ width: 0 }} animate={{ width: `${progress}%` }} className="h-full bg-[var(--secondary)]"></motion.div>
-            </div>
-            <div className="text-right text-[10px] font-bold opacity-50 mt-2">NEXT: {Math.floor(nextLevelExp - stats.totalExp)} pt</div>
+        <div className="flex flex-col items-center gap-4 pb-10 mt-4">
+          <div className="text-center mt-2 mb-4">
+            <h2 className="font-black text-4xl md:text-5xl tracking-widest text-[var(--text)]">ケイサンアタック<span className="text-[var(--primary)]">！</span></h2>
           </div>
           
-          <div className="grid grid-cols-3 gap-2 w-full">
+          <div className="grid grid-cols-3 gap-2 w-full mt-2">
             <MotionButton className="bg-[var(--panel)] text-[var(--text)] p-3 flex-col h-auto" onClick={() => { setConfigMode('SCORE_ATTACK'); setView('singleConfig'); }}>
               <i className="bi bi-award text-2xl text-[var(--accent)] mb-1"></i> <span className="text-[10px]">スコア</span>
             </MotionButton>
@@ -539,17 +518,16 @@
               {stats.missions?.list.map(m => {
                 const c = m.current >= m.target;
                 return (
-                  <div key={m.id} className="flex items-center justify-between bg-[var(--bg)] p-2 rounded-xl">
+                  <div key={m.id} className="flex items-center justify-between bg-[var(--bg)] p-2 rounded-xl border border-[var(--border)]">
                     <div className="flex flex-col pr-2"><span className={`text-xs font-bold ${c ? 'text-[var(--secondary)] line-through' : ''}`}>{m.desc}</span><span className="text-[10px] opacity-60 font-bold">{Math.min(m.current, m.target)} / {m.target}</span></div>
-                    {c ? (m.claimed ? <span className="opacity-40 font-bold text-xs"><i className="bi bi-check"></i> 完了</span> : <button onClick={() => claim(m.id)} className="bg-[var(--accent)] text-[var(--text)] font-bold text-xs px-3 py-1 rounded border border-[var(--border)]">うけとる</button>) : <span className="font-bold text-xs opacity-60"><i className="bi bi-coin text-[var(--accent)]"></i> {m.reward}</span>}
+                    {c ? (m.claimed ? <span className="opacity-40 font-bold text-xs"><i className="bi bi-check"></i> 完了</span> : <button onClick={() => claim(m.id)} className="bg-[var(--accent)] text-[var(--text)] font-bold text-xs px-3 py-1 rounded border border-[var(--border)] shadow-sm">うけとる</button>) : <span className="font-bold text-xs opacity-60">+{m.reward} スコア</span>}
                   </div>
                 );
               })}
             </div>
           </div>
-          <div className="w-full flex gap-2 mt-2">
-            <MotionButton className="bg-[var(--panel)] py-3 flex-1 text-sm" onClick={() => setView('shop')}><i className="bi bi-shop"></i> きせかえ</MotionButton>
-            <MotionButton className="bg-[var(--panel)] py-3 flex-1 text-sm" onClick={() => setView('manager')}><i className="bi bi-gear"></i> コース管理</MotionButton>
+          <div className="w-full mt-2 text-center">
+            <button className="opacity-50 font-bold py-2 hover:opacity-100 transition-opacity" onClick={() => { audioCtrl.playSE('click'); setView('manager') }}><i className="bi bi-gear"></i> 先生むけ：コース管理</button>
           </div>
         </div>
       );
@@ -717,7 +695,7 @@
       </div>
     );
 
-    const GameView = ({ state, setState, setView, stats, setStats, peerState, setPeerState }) => {
+    const GameView = ({ state, setState, setView, stats, setStats, peerState, setPeerState, addGlobalScore }) => {
       const [score, setScore] = useState(0); const [combo, setCombo] = useState(0); const [maxCombo, setMaxCombo] = useState(0);
       const [qIndex, setQIndex] = useState(0); const [ans, setAns] = useState(''); const [correctCount, setCorrectCount] = useState(0);
       const [startT] = useState(Date.now()); const [currT, setCurrT] = useState(Date.now());
@@ -740,13 +718,28 @@
         if (mistakesRef.current.length > 0) StorageAPI.addMistakes(mistakesRef.current);
         if (state.courseName === 'にがて克服') StorageAPI.removeMistakes(state.problemSet.filter(p => !mistakesRef.current.some(m => m.q === p.q)));
         let n = { ...stats }; const sec = Number(((Date.now() - startT) / 1000).toFixed(1));
-        let baseExp = score;
-        if (state.gameMode === 'TIME_ATTACK') baseExp = 1000 + Math.max(0, Math.floor(120 - sec) * 10);
-        if (state.gameMode === 'SUDDEN_DEATH') baseExp = correctCount * 50;
-        n = StorageAPI.updateDailyAndMissions(n, baseExp, maxCombo, 1, state.gameMode, correctCount);
+        
+        let gameScore = score;
+        if (state.gameMode === 'TIME_ATTACK') gameScore = 1000 + Math.max(0, Math.floor(120 - sec) * 10);
+        if (state.gameMode === 'SUDDEN_DEATH') gameScore = correctCount * 50;
+        
+        n = StorageAPI.updateDailyAndMissions(n, gameScore, maxCombo, 1, state.gameMode, correctCount);
         StorageAPI.saveStats(n); setStats(n);
-        setState(p => ({ ...p, finalScore: baseExp, finalCombo: maxCombo, finalTime: sec, finalCorrect: correctCount, earnedExp: baseExp, previousExp: stats.totalExp, mistakes: mistakesRef.current }));
-        if (isM) { if (peerState.role === 'client') peerState.conn.send({ type: 'game_finish', data: { finalScore: baseExp } }); else peerState.connections.forEach(c => c.send({ type: 'game_finish' })); }
+
+        // プレイ完了報酬としておんたまドリルのスコアに+5加算
+        addGlobalScore(5);
+
+        setState(p => ({ 
+          ...p, 
+          finalGameScore: gameScore, 
+          finalCombo: maxCombo, 
+          finalTime: sec, 
+          finalCorrect: correctCount, 
+          earnedGlobalScore: 5, 
+          mistakes: mistakesRef.current 
+        }));
+        
+        if (isM) { if (peerState.role === 'client') peerState.conn.send({ type: 'game_finish', data: { finalScore: gameScore } }); else peerState.connections.forEach(c => c.send({ type: 'game_finish' })); }
         setView('result');
       };
 
@@ -809,10 +802,10 @@
     };
 
     const ResultView = ({ state, setView, peerState, leaveRoom }) => {
-      const { earnedExp, previousExp, finalScore, finalCombo, finalTime, finalCorrect } = state;
-      const { level, title, badge } = getLevelInfo(previousExp + earnedExp);
-      const lvlUp = level > getLevelInfo(previousExp).level;
-      useEffect(() => { triggerConfetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#E07A5F', '#81B29A', '#F2CC8F'] }); if(lvlUp) audioCtrl.playSE('combo', 10); }, []);
+      const { earnedGlobalScore, finalGameScore, finalTime, finalCorrect } = state;
+
+      useEffect(() => { triggerConfetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#E07A5F', '#81B29A', '#F2CC8F'] }); }, []);
+      
       const isM = peerState && peerState.role;
       const ranks = isM ? Object.values(peerState.participants).sort((a,b)=>b.score-a.score) : [];
       return (
@@ -824,11 +817,14 @@
               {ranks.map((p,i) => <div key={p.id} className="flex justify-between items-center border-b border-[var(--border)] p-3 font-bold"><span className="text-lg text-[var(--text)]">{i+1}位 {p.name}</span><span className="text-2xl text-[var(--primary)]">{p.score}pt</span></div>)}
             </div>
           ) : (
-            <div className="card-pop p-8 text-center mb-6">
-              <h4 className="font-bold opacity-70 mb-2 text-[var(--text)]">{state.gameMode==='TIME_ATTACK'?'CLEAR TIME':state.gameMode==='SUDDEN_DEATH'?'連続正解':'SCORE'}</h4>
-              <div className="text-7xl font-black text-[var(--primary)] mb-4">{state.gameMode==='TIME_ATTACK'?`${finalTime}秒`:state.gameMode==='SUDDEN_DEATH'?`${finalCorrect}問`:finalScore}</div>
-              <div className="text-xl font-bold text-[var(--secondary)] mb-4 bg-[var(--bg)] inline-block px-4 py-1 rounded-full border border-[var(--border)]">+{earnedExp} EXP!</div>
-              {lvlUp && <div className="text-2xl font-black text-[var(--accent)] animate-bounce mt-2">レベルアップ！ {badge} {title}</div>}
+            <div className="card-pop p-6 text-center mb-6">
+              <h4 className="font-bold opacity-70 mb-2 text-[var(--text)]">{state.gameMode==='TIME_ATTACK'?'CLEAR TIME':state.gameMode==='SUDDEN_DEATH'?'連続正解':'GAME SCORE'}</h4>
+              <div className="text-7xl font-black text-[var(--text)] mb-6">{state.gameMode==='TIME_ATTACK'?`${finalTime}秒`:state.gameMode==='SUDDEN_DEATH'?`${finalCorrect}問`:finalGameScore}</div>
+              
+              <div className="bg-[var(--bg)] border-2 border-[var(--border)] rounded-xl p-4 inline-block">
+                <p className="text-sm font-bold text-[var(--text)] opacity-80 mb-1">ドリルクリアボーナス！</p>
+                <div className="text-2xl font-black text-[var(--secondary)]">+{earnedGlobalScore} スコア</div>
+              </div>
             </div>
           )}
           {state.mistakes.length > 0 && (
@@ -842,43 +838,7 @@
               {peerState.role === 'host' && <MotionButton className="bg-[var(--secondary)] text-white w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={()=>setView('hostRoom')}>もう一回あそぶ</MotionButton>}
               <button className="font-bold opacity-50 py-3 hover:opacity-100 transition-opacity" onClick={leaveRoom}>退出してホームへ</button>
             </div>
-          ) : <MotionButton className="bg-[var(--text)] text-white w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)] mt-auto" onClick={()=>setView('home')}>ホームへもどる</MotionButton>}
-        </div>
-      );
-    };
-
-    const ShopView = ({ setView, stats, setStats }) => {
-      const [tab, setTab] = useState('bases');
-      const buy = (i, c) => {
-        let n = {...stats}; if(n.coins < i.price) return showToast('error', 'コインが足りません');
-        n.coins -= i.price; n.inventory[c].push(i.id);
-        if(c==='themes') n.theme = i.id; else n.equipped[c.slice(0,-1)] = i.id;
-        audioCtrl.playSE('coin'); showToast('success', '購入しました'); StorageAPI.saveStats(n); setStats(n);
-      };
-      const equip = (i, c) => {
-        let n = {...stats}; if(c==='themes') n.theme = i.id; else { let p = c.slice(0,-1); n.equipped[p] = n.equipped[p]===i.id ? null : i.id; }
-        audioCtrl.playSE('click'); StorageAPI.saveStats(n); setStats(n);
-      };
-      return (
-        <div className="flex flex-col h-[85vh] mt-4">
-          <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl text-[var(--text)]"><i className="bi bi-shop text-[var(--secondary)]"></i> きせかえ</h3><span className="font-black bg-[var(--panel)] text-[var(--text)] px-4 py-1.5 rounded-full border-2 border-[var(--border)] shadow-sm"><i className="bi bi-coin text-[var(--accent)]"></i> {stats.coins}</span></div>
-          <div className="flex gap-4 mb-4 h-24">
-            <div className="w-24 h-24 bg-[var(--bg)] border-2 border-[var(--border)] rounded-2xl overflow-hidden shadow-inner"><LayeredAvatar equipped={stats.equipped} size="text-6xl"/></div>
-            <div className="flex-grow grid grid-cols-3 gap-2 content-start">{[{id:'bases',l:'ベース'},{id:'hats',l:'ぼうし'},{id:'faces',l:'かお'},{id:'props',l:'もちもの'},{id:'themes',l:'テーマ'}].map(t => <button key={t.id} onClick={()=>{audioCtrl.playSE('click'); setTab(t.id)}} className={`font-bold text-[10px] rounded-lg border-2 transition-colors py-1.5 ${tab===t.id?'bg-[var(--text)] text-[var(--panel)] border-[var(--text)]':'bg-[var(--panel)] text-[var(--text)] border-[var(--border)]'}`}>{t.l}</button>)}</div>
-          </div>
-          <div className="card-pop flex-grow overflow-y-auto p-3 grid grid-cols-3 gap-3 content-start">
-            {SHOP_ITEMS[tab].map(i => {
-              const o = stats.inventory[tab].includes(i.id); const eq = tab==='themes'?stats.theme===i.id:stats.equipped[tab.slice(0,-1)]===i.id;
-              return (
-                <div key={i.id} onClick={()=>o?equip(i,tab):buy(i,tab)} className={`border-2 rounded-xl p-2 text-center cursor-pointer transition-transform active:scale-95 ${eq?'bg-[var(--accent)] border-transparent':o?'bg-[var(--bg)] border-[var(--border)]':'bg-[var(--panel)] border-[var(--border)] opacity-60'}`}>
-                  <div className="text-3xl mb-1">{tab==='themes'?<i className="bi bi-paint-bucket text-[var(--text)]"></i>:i.char}</div>
-                  <div className="text-[9px] font-bold h-6 overflow-hidden text-[var(--text)]">{i.name}</div>
-                  <div className="mt-1">{o?<span className="text-[10px] bg-[var(--text)] text-[var(--panel)] px-2 py-0.5 rounded-full">{eq?'そうび':'もってる'}</span>:<span className="text-[10px] font-bold bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] px-2 py-0.5 rounded-full"><i className="bi bi-coin text-[var(--accent)]"></i> {i.price}</span>}</div>
-                </div>
-              );
-            })}
-          </div>
-          <MotionButton className="bg-[var(--text)] text-[var(--panel)] w-full py-4 mt-4 border-none shadow-md" onClick={()=>setView('home')}>もどる</MotionButton>
+          ) : <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)] mt-auto" onClick={()=>setView('home')}>ホームへもどる</MotionButton>}
         </div>
       );
     };
@@ -907,7 +867,7 @@
               </div>
             ))}
           </div>
-          <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-4 mb-3 border-none shadow-md" onClick={()=>setView('import')}><i className="bi bi-download"></i> コースを追加 (AI/共有)</MotionButton>
+          <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-4 mb-3 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={()=>setView('import')}><i className="bi bi-download"></i> コースを追加 (AI/共有)</MotionButton>
           <button className="font-bold py-3 opacity-50 hover:opacity-100 transition-opacity" onClick={()=>setView('home')}>もどる</button>
         </div>
       );
@@ -956,9 +916,21 @@
     const App = () => {
       const [view, setView] = useState('loading');
       const [configMode, setConfigMode] = useState('SCORE_ATTACK');
-      const [state, setState] = useState({ problemSet: [], timeLimitSec: 0, courseName: '', finalScore: 0, finalCombo: 0, earnedExp: 0, previousExp: 0, gameMode: 'SCORE_ATTACK', mistakes: [] });
+      const [state, setState] = useState({ problemSet: [], timeLimitSec: 0, courseName: '', finalGameScore: 0, finalCombo: 0, earnedGlobalScore: 0, previousGlobalScore: 0, gameMode: 'SCORE_ATTACK', mistakes: [] });
       const [stats, setStats] = useState(StorageAPI.getStats());
       const [isMuted, setIsMuted] = useState(audioCtrl.muted);
+      
+      // おんたまドリルのグローバルスコアを管理
+      const [globalScore, setGlobalScore] = useState(parseInt(localStorage.getItem('gogo_drill_score') || '0', 10));
+
+      const addGlobalScore = useCallback((points) => {
+        setGlobalScore(prev => {
+          const next = prev + points;
+          localStorage.setItem('gogo_drill_score', next.toString());
+          return next;
+        });
+      }, []);
+
       const scriptsLoaded = useExternalScripts();
       const [urlHostId, setUrlHostId] = useState(null);
       const [peerState, setPeerState] = useState({ role: null, peer: null, conn: null, hostId: null, myName: '', connections: [], participants: {} });
@@ -967,7 +939,7 @@
       useEffect(() => {
         const h = new URLSearchParams(window.location.search).get('host');
         if (h) { setUrlHostId(h); setView('clientJoin'); window.history.replaceState({}, '', window.location.pathname); }
-        else setTimeout(() => setView('home'), 800);
+        else setTimeout(() => setView('home'), 1500);
       }, []);
 
       useEffect(() => {
@@ -1008,13 +980,7 @@
       const leave = () => { if (peerState.peer) peerState.peer.destroy(); setPeerState({ role: null, peer: null, conn: null, hostId: null, myName: '', connections: [], participants: {} }); setView('home'); };
 
       const GlobalStyle = () => {
-        let v = `--bg: #FDFBF7; --primary: #DE7A66; --secondary: #7FA998; --accent: #F4C476; --text: #595B66; --panel: #FFFFFF; --border: #E8E4D9;`;
-        if (stats.theme === 'dark') v = `--bg: #2C303A; --primary: #E07A5F; --secondary: #81B29A; --accent: #F2CC8F; --text: #F4F1EA; --panel: #3D4251; --border: #4A4E69;`;
-        if (stats.theme === 'ocean') v = `--bg: #F4F9F9; --primary: #E07A5F; --secondary: #6B9AC4; --accent: #97AABD; --text: #4A5759; --panel: #FFFFFF; --border: #DDE5E8;`;
-        if (stats.theme === 'sakura') v = `--bg: #FFF7F8; --primary: #D988A3; --secondary: #9DB4C0; --accent: #F4D3D4; --text: #6A5B63; --panel: #FFFFFF; --border: #F0E4E6;`;
-        if (stats.theme === 'forest') v = `--bg: #F5F7F2; --primary: #E2856E; --secondary: #7A9E7E; --accent: #C3CBA3; --text: #4D574D; --panel: #FFFFFF; --border: #DDE2D8;`;
-        if (stats.theme === 'choco') v = `--bg: #F5F1ED; --primary: #B26A5E; --secondary: #849685; --accent: #C49A76; --text: #594D46; --panel: #FFFFFF; --border: #E2DAD1;`;
-        if (stats.theme === 'cyber') v = `--bg: #111111; --primary: #FF5A5F; --secondary: #08D9D6; --accent: #FFC000; --text: #EEEEEE; --panel: #222831; --border: #393E46;`;
+        const v = `--bg: #F4F1DE; --primary: #E07A5F; --secondary: #81B29A; --accent: #F2CC8F; --text: #3D405B; --panel: #FFFFFF; --border: #e5e0c8;`;
         return <style>{`:root { ${v} }`}</style>;
       };
 
@@ -1023,26 +989,30 @@
           <GlobalStyle />
           {view !== 'game' && (
             <header className="flex-shrink-0 bg-[var(--panel)] border-b-2 border-[var(--border)] py-3 px-5 flex justify-between items-center z-50 shadow-sm">
-              <div className="flex items-center cursor-pointer gap-2" onClick={() => { audioCtrl.playSE('click'); peerState.role ? leave() : setView('home'); }}>
-                <div className="text-[var(--primary)]"><i className="bi bi-journal-text text-2xl"></i></div>
-                <h1 className="text-2xl font-black tracking-widest text-[var(--text)]">Qalc<span className="text-[var(--primary)]">.</span></h1>
+              <div className="flex items-center gap-3">
+                <a href="https://hot-spring-egg.github.io/ontama-drill/" className="bg-[var(--bg)] border-2 border-[var(--border)] rounded-lg px-2 py-1 text-xs font-bold text-[var(--text)] flex items-center gap-1 hover:bg-[var(--secondary)] hover:text-white transition-colors" onClick={() => audioCtrl.playSE('click')}>
+                  <i className="bi bi-arrow-left"></i> <span className="hidden sm:inline">ドリルに</span>もどる
+                </a>
+                <div className="flex items-center cursor-pointer gap-2" onClick={() => { audioCtrl.playSE('click'); peerState.role ? leave() : setView('home'); }}>
+                  <div className="text-[var(--primary)]"><i className="bi bi-journal-text text-2xl"></i></div>
+                  <h1 className="text-xl sm:text-2xl font-black tracking-widest text-[var(--text)] hidden sm:block">ケイサンアタック<span className="text-[var(--primary)]">！</span></h1>
+                </div>
               </div>
               <button onClick={() => setIsMuted(audioCtrl.toggle())} className="text-2xl opacity-50 hover:opacity-100 transition-opacity"><i className={`bi ${isMuted ? 'bi-volume-mute' : 'bi-volume-up text-[var(--primary)]'}`}></i></button>
             </header>
           )}
           <main className="flex-grow relative overflow-hidden">
             <AnimatePresence mode="wait">
-              {view === 'loading' && <PageWrapper key="L"><div className="flex items-center justify-center h-[50vh]"><div className="animate-spin text-4xl text-[var(--secondary)]"><i className="bi bi-arrow-repeat"></i></div></div></PageWrapper>}
-              {view === 'home' && <PageWrapper key="H"><HomeView setView={setView} stats={stats} setStats={setStats} setConfigMode={setConfigMode} initHost={initHost} /></PageWrapper>}
+              {view === 'loading' && <PageWrapper key="L"><Loading /></PageWrapper>}
+              {view === 'home' && <PageWrapper key="H"><HomeView setView={setView} stats={stats} setStats={setStats} setConfigMode={setConfigMode} initHost={initHost} globalScore={globalScore} addGlobalScore={addGlobalScore} /></PageWrapper>}
               {view === 'singleConfig' && <PageWrapper key="SC"><SingleConfigView setView={setView} setState={setState} configMode={configMode} /></PageWrapper>}
               {view === 'hostRoom' && <PageWrapper key="HR"><HostRoomView peerState={peerState} setPeerState={setPeerState} broadcast={broadcast} setView={setView} setState={setState} configMode={configMode} setConfigMode={setConfigMode} /></PageWrapper>}
               {view === 'clientJoin' && <PageWrapper key="CJ"><ClientJoinView initClient={initClient} urlHostId={urlHostId} setView={setView} /></PageWrapper>}
               {view === 'clientWait' && <PageWrapper key="CW"><ClientWaitView peerState={peerState} leaveRoom={leave} /></PageWrapper>}
-              {view === 'game' && <PageWrapper key="G"><GameView state={state} setState={setState} setView={setView} stats={stats} setStats={setStats} peerState={peerState} setPeerState={setPeerState} /></PageWrapper>}
+              {view === 'game' && <PageWrapper key="G"><GameView state={state} setState={setState} setView={setView} stats={stats} setStats={setStats} peerState={peerState} setPeerState={setPeerState} addGlobalScore={addGlobalScore} /></PageWrapper>}
               {view === 'result' && <PageWrapper key="R"><ResultView state={state} setView={setView} peerState={peerState} leaveRoom={leave} /></PageWrapper>}
               {view === 'manager' && <PageWrapper key="M"><ManagerView setView={setView} /></PageWrapper>}
               {view === 'import' && <PageWrapper key="I"><ImportView setView={setView} /></PageWrapper>}
-              {view === 'shop' && <PageWrapper key="S"><ShopView setView={setView} stats={stats} setStats={setStats} /></PageWrapper>}
             </AnimatePresence>
           </main>
           <CustomToast />
