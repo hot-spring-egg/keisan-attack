@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Qalc！</title>
+  
+  <!-- CSS & Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+  <link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & Babel & Framer Motion -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/framer-motion@10.16.4/dist/framer-motion.js"></script>
+
+  <!-- Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <style>
+    body { 
+      font-family: 'Zen Maru Gothic', sans-serif; 
+      touch-action: manipulation; 
+      transition: background-color 0.3s ease; 
+      overflow: hidden; 
+      background-color: var(--bg);
+      color: var(--text);
+      /* 方眼紙ノート風の背景 */
+      background-image: 
+        linear-gradient(var(--border) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border) 1px, transparent 1px);
+      background-size: 24px 24px;
+      background-position: center top;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    ruby { ruby-align: center; }
+    ruby rt { font-size: 0.5em; font-weight: 500; letter-spacing: 0; color: var(--text); opacity: 0.8; }
+    .ruby-text { line-height: 1.8; }
+
+    /* 北欧文具風のUIコンポーネント */
+    .card-pop {
+      border: 2px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+      background: var(--panel);
+    }
+    
+    .btn-pop {
+      border-radius: 16px;
+      font-weight: 700;
+      border: 2px solid rgba(0,0,0,0.05);
+      box-shadow: 0 4px 0 rgba(0,0,0,0.08);
+      outline: none;
+      transition: transform 0.1s, box-shadow 0.1s, filter 0.2s;
+    }
+    .btn-pop:active {
+      transform: translateY(4px);
+      box-shadow: 0 0 0 rgba(0,0,0,0.08);
+    }
+    .btn-pop:hover {
+      filter: brightness(0.95);
+    }
+
+    /* キーパッド (フラット＆マット) */
+    .num-key {
+      background-color: var(--panel);
+      color: var(--text);
+      border: 2px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 4px 0 var(--border);
+      font-size: 2rem;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      outline: none;
+      user-select: none;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    .num-key:active {
+      transform: translateY(4px);
+      box-shadow: 0 0 0 var(--border);
+      background-color: var(--bg);
+    }
+    
+    .symbol-key {
+      background-color: var(--bg);
+      color: var(--text);
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 2px 0 var(--border);
+      font-size: 1.5rem;
+      font-weight: 900;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      outline: none;
+      user-select: none;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    .symbol-key:active {
+      transform: translateY(2px);
+      box-shadow: 0 0 0 var(--border);
+      background-color: var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } = React;
+    const { motion, AnimatePresence } = window.Motion;
+
+    const R = ({ c, r }) => <ruby>{c}<rt>{r}</rt></ruby>;
+
+    // ==========================================
+    // 1. サウンド & ハプティック エンジン
+    // ==========================================
+    class AudioController {
+      constructor() { this.ctx = null; this.muted = true; this.bgmInterval = null; }
+      init() { if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)(); if (this.ctx.state === 'suspended') this.ctx.resume(); }
+      toggle() { this.muted = !this.muted; if (!this.muted) { this.init(); this.playSE('click'); } else { this.stopBGM(); } return this.muted; }
+      vibrate(pattern) { if (!this.muted && typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(pattern); }
+      playSE(type, param = 0) {
+        if (this.muted || !this.ctx) return;
+        const t = this.ctx.currentTime; const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain();
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        switch (type) {
+          case 'click':
+            osc.type = 'square'; osc.frequency.setValueAtTime(600, t); gain.gain.setValueAtTime(0.05, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05); osc.start(t); osc.stop(t + 0.05);
+            this.vibrate(10); break;
+          case 'correct':
+            osc.type = 'sine'; osc.frequency.setValueAtTime(880, t); osc.frequency.exponentialRampToValueAtTime(1760, t + 0.1); gain.gain.setValueAtTime(0.1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3); osc.start(t); osc.stop(t + 0.3);
+            this.vibrate([20, 50, 20]); break;
+          case 'combo':
+            osc.type = 'sine'; const freq = Math.min(880 + param * 55, 2000); osc.frequency.setValueAtTime(freq, t); gain.gain.setValueAtTime(0.1, t); gain.gain.exponentialRampToValueAtTime(0.01, t + 0.2); osc.start(t); osc.stop(t + 0.2);
+            this.vibrate([30, 30, 40]); break;
+          case 'wrong':
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(150, t); osc.frequency.linearRampToValueAtTime(100, t + 0.3); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.01, t + 0.3); osc.start(t); osc.stop(t + 0.3);
+            this.vibrate([100, 50, 100]); break;
+          case 'finish':
+            osc.type = 'triangle'; osc.frequency.setValueAtTime(440, t); osc.frequency.setValueAtTime(880, t + 0.3); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.001, t + 1.0); osc.start(t); osc.stop(t + 1.0); break;
+          case 'coin':
+            osc.type = 'sine'; osc.frequency.setValueAtTime(1200, t); osc.frequency.setValueAtTime(1600, t + 0.1); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.01, t + 0.3); osc.start(t); osc.stop(t + 0.3); break;
+        }
+      }
+      playBGM(type) {
+        if (this.muted) return; this.stopBGM(); this.init(); let step = 0;
+        const notes = type === 'game' ? [261.63, 329.63, 392.00, 523.25] : [220, 277.18, 329.63, 440];
+        this.bgmInterval = setInterval(() => {
+          if (this.muted || !this.ctx) return; const t = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator(); const gain = this.ctx.createGain(); osc.connect(gain); gain.connect(this.ctx.destination);
+          osc.type = 'square'; osc.frequency.value = notes[step % notes.length] / 2;
+          gain.gain.setValueAtTime(0.015, t); gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15); osc.start(t); osc.stop(t + 0.15); step++;
+        }, 250);
+      }
+      stopBGM() { if (this.bgmInterval) { clearInterval(this.bgmInterval); this.bgmInterval = null; } }
+    }
+    const audioCtrl = new AudioController();
+
+    // ==========================================
+    // 2. 問題の自動生成ジェネレーター
+    // ==========================================
+    const generateDynamicProblems = () => {
+      const p = {};
+      const add = (g, q, a) => { if(!p[g]) p[g]=[]; p[g].push({q: String(q), a: String(a).split('|')}); };
+      const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+      const gcd = (x, y) => y === 0 ? x : gcd(y, x % y);
+
+      // 1年生
+      for(let i=1;i<=9;i++){
+        for(let j=1;j<=9;j++){
+          add("1年_たしざん", `${i}+${j}`, i+j); add("1年_あわせて10", `${i}+?=10`, 10-i);
+          add("2年_九九", `${i}×${j}`, i*j); add("2年_九九あなうめ", `${i}×?=${i*j}`, j);
+          add("3年_わり算", `${i*j}÷${i}`, j);
+        }
+      }
+      for(let i=11;i<=18;i++) for(let j=2;j<=9;j++) if(i-j>0 && i-j<10) add("1年_ひきざん", `${i}-${j}`, i-j);
+      for(let i=1;i<=9;i++) for(let j=1;j<=i;j++) add("1年_ひきざん", `${i}-${j}`, i-j);
+      for(let i=1;i<=9;i++) { add("1年_10といくつ", `10+${i}`, 10+i); add("1年_10といくつ", `${i}+10`, 10+i); }
+      for(let i=0;i<50;i++){ let a=rand(1,5), b=rand(1,5), c=rand(1,5); add("1年_3つの数", `${a}+${b}+${c}`, a+b+c); if(a+b>c) add("1年_3つの数", `${a}+${b}-${c}`, a+b-c); }
+      
+      // 2年生
+      for(let i=0;i<50;i++){
+        let a=rand(10,99), b=rand(10,99); add("2年_2けたのたしざん", `${a}+${b}`, a+b);
+        let max=Math.max(a,b), min=Math.min(a,b); add("2年_2けたのひきざん", `${max}-${min}`, max-min);
+      }
+      for(let i=1;i<=9;i++) for(let j=1;j<=9;j++) { add("2年_なん十の計算", `${i*10}+${j*10}`, (i+j)*10); if(i>j) add("2年_なん十の計算", `${i*10}-${j*10}`, (i-j)*10); }
+      for(let i=1;i<=10;i++){ add("2年_長さ(cm,mm)", `${i}cmは 何mm？`, i*10); add("2年_長さ(m,cm)", `${i}mは 何cm？`, i*100); add("2年_かさ(L,dL)", `${i}Lは 何dL？`, i*10); }
+
+      // 3年生
+      for(let i=0;i<50;i++){
+        let b=rand(2,9), q=rand(2,9), r=rand(1,b-1); add("3年_あまりのあるわり算", `${b*q+r}÷${b}`, `${q}あまり${r}|${q}あまる${r}`);
+        let c=rand(10,99), d=rand(2,9); add("3年_かけ算の筆算", `${c}×${d}`, c*d);
+      }
+      for(let i=1;i<=9;i++) for(let j=1;j<=9;j++) { add("3年_小数のたしざん", `0.${i}+0.${j}`, ((i+j)/10).toFixed(1).replace('.0','')); if(i>j) add("3年_小数のひきざん", `0.${i}-0.${j}`, ((i-j)/10).toFixed(1)); }
+      for(let i=1;i<=9;i++) for(let j=1;j<=9;j++) if(i+j<=10) add("3年_分数のたしざん", `${i}/10+${j}/10`, i+j===10?'1':`${i+j}/10`);
+      for(let i=2;i<=10;i++) for(let j=1;j<i;j++) add("3年_分数のひきざん", `${i===10?'1':i+'/10'}-${j}/10`, `${i-j}/10`);
+
+      // 4年生
+      for(let i=0;i<50;i++){
+        let b=rand(11,99), q=rand(2,9); add("4年_わり算(2けた)", `${b*q}÷${b}`, q);
+        let s1=rand(2,90)/10, s2=rand(2,9); add("4年_小数×整数", `${s1.toFixed(1)}×${s2}`, (s1*s2).toFixed(1).replace('.0',''));
+        let s3=s1*s2; add("4年_小数÷整数", `${s3.toFixed(1)}÷${s2}`, s1.toFixed(1));
+      }
+      for(let i=2;i<=15;i++){ add("4年_面積", `1辺が${i}cmの正方形の面積は？`, `${i*i}㎠|${i*i}`); add("4年_面積", `たて${i}cm、よこ${i+2}cmの長方形の面積は？`, `${i*(i+2)}㎠|${i*(i+2)}`); }
+
+      // 5年生
+      for(let d1=2;d1<=6;d1++) for(let d2=d1+1;d2<=8;d2++) if(gcd(d1,d2)===1){
+        for(let n1=1;n1<d1;n1++) for(let n2=1;n2<d2;n2++){
+          let num=n1*d2+n2*d1, den=d1*d2, g=gcd(num,den); add("5年_異分母の分数(+)", `${n1}/${d1}+${n2}/${d2}`, num%den===0?String(num/den):`${num/g}/${den/g}`);
+          let numH=n1*d2-n2*d1; if(numH>0) { let gH=gcd(numH,den); add("5年_異分母の分数(-)", `${n1}/${d1}-${n2}/${d2}`, `${numH/gH}/${den/gH}`); }
+        }
+      }
+      for(let i=0;i<40;i++){
+        let s1=rand(11,99)/10, s2=rand(2,9)/10; add("5年_小数×小数", `${s1.toFixed(1)}×${s2.toFixed(1)}`, parseFloat((s1*s2).toFixed(2)));
+        let q=rand(2,99), b=rand(2,9)/10, a=q*b; add("5年_小数÷小数", `${a.toFixed(2)}÷${b.toFixed(1)}`, q);
+      }
+      for(let i=1;i<=9;i++){ add("5年_割合", `割合 0.${i} は何％？`, `${i*10}％|${i*10}`); add("5年_割合", `割合 0.${i} は何割？`, `${i}割`); }
+      for(let i=2;i<=20;i+=2) add("5年_平均", `${i} と ${i+4} と ${i+8} の平均は？`, i+4);
+
+      // 6年生
+      for(let i=0;i<60;i++){
+        let d1=rand(2,7), n1=rand(1,d1-1), d2=rand(2,7), n2=rand(1,d2-1);
+        let g1=gcd(n1*n2, d1*d2); add("6年_分数のかけ算", `${n1}/${d1}×${n2}/${d2}`, (d1*d2/g1)===1?String(n1*n2/g1):`${n1*n2/g1}/${d1*d2/g1}`);
+        let g2=gcd(n1*d2, d1*n2); add("6年_分数のわり算", `${n1}/${d1}÷${n2}/${d2}`, (d1*n2/g2)===1?String(n1*d2/g2):`${n1*d2/g2}/${d1*n2/g2}`);
+      }
+      for(let v=2;v<=9;v++){
+        for(let t=2;t<=5;t++){
+          add("6年_速さ・時間・道のり", `時速${v*10}kmで ${t}時間 進むと 何km？`, v*10*t);
+          add("6年_速さ・時間・道のり", `${v*10*t}kmを 時速${v*10}kmで進むと 何時間？`, t);
+        }
+      }
+      for(let i=1;i<=10;i++) {
+        add("6年_円の面積・円周", `半径${i}cmの円周は？(円周率3.14)`, parseFloat((i*2*3.14).toFixed(2)));
+        add("6年_円の面積・円周", `半径${i}cmの円の面積は？(円周率3.14)`, parseFloat((i*i*3.14).toFixed(2)));
+      }
+      for(let i=2;i<=9;i++){
+        let x=rand(2,5), y=i*x, x2=x+rand(1,4);
+        add("6年_比例と反比例", `yはxに比例。xが${x}でyが${y}。xが${x2}のときyは？`, i*x2);
+      }
+      for(let i=2;i<=15;i++){ add("6年_文字と式", `x + ${i} = ${i+rand(5,15)}。xは？`, rand(5,15)); add("6年_文字と式", `x × ${i} = ${i*rand(2,9)}。xは？`, rand(2,9)); }
+      
+      // チャレンジ
+      for(let i=0;i<30;i++){
+        let a=rand(2,9), b=rand(2,9), c=rand(2,9);
+        add("チャレンジ_四則混合", `${a}+${b}×${c}`, a+b*c);
+        add("チャレンジ_四則混合", `(${a}+${b})×${c}`, (a+b)*c);
+        if(a*b-c>0) add("チャレンジ_四則混合", `${a}×${b}-${c}`, a*b-c);
+      }
+      return p;
+    };
+
+    const SHOP_ITEMS = {
+      bases: [
+        { id: 'b_dog', char: '🐶', name: 'イヌ', price: 0 }, { id: 'b_cat', char: '🐱', name: 'ネコ', price: 200 },
+        { id: 'b_frog', char: '🐸', name: 'カエル', price: 250 }, { id: 'b_bear', char: '🐻', name: 'クマ', price: 300 },
+        { id: 'b_alien', char: '👽', name: 'うちゅうじん', price: 800 }, { id: 'b_dragon', char: '🐉', name: 'ドラゴン', price: 1000 }
+      ],
+      hats: [
+        { id: 'h_cap', char: '🧢', name: 'キャップ', price: 150 }, { id: 'h_crown', char: '👑', name: 'おうかん', price: 500 },
+        { id: 'h_star', char: '🌟', name: '星', price: 200 }, { id: 'h_idea', char: '💡', name: 'ひらめき', price: 200 }
+      ],
+      faces: [
+        { id: 'f_glass', char: '🕶️', name: 'サングラス', price: 200 }, { id: 'f_sparkle', char: '✨', name: 'きらきら', price: 200 },
+        { id: 'f_flower', char: '💮', name: 'はなまる', price: 200 }
+      ],
+      props: [
+        { id: 'p_pencil', char: '✏️', name: 'えんぴつ', price: 100 }, { id: 'p_game', char: '🎮', name: 'ゲーム', price: 400 },
+        { id: 'p_rocket', char: '🚀', name: 'ロケット', price: 800 }, { id: 'p_trophy', char: '🏆', name: 'トロフィー', price: 1000 }
+      ],
+      themes: [
+        { id: 'default', name: 'ナチュラル (しろ)', price: 0 }, { id: 'dark', name: 'よる (ネイビー)', price: 1000 },
+        { id: 'sakura', name: 'さくら (ピンク)', price: 1000 }, { id: 'ocean', name: 'うみ (ブルー)', price: 1000 },
+        { id: 'forest', name: 'もり (グリーン)', price: 1000 }, { id: 'choco', name: 'チョコ (ブラウン)', price: 1000 }
+      ]
+    };
+
+    const MISSION_POOL = [
+      { id: 'p1', type: 'play', target: 1, reward: 20, desc: '今日 1回 プレイ' },
+      { id: 'p3', type: 'play', target: 3, reward: 50, desc: '今日 3回 プレイ' },
+      { id: 'c10', type: 'combo', target: 10, reward: 50, desc: '1プレイで 10コンボ' },
+      { id: 's1000', type: 'score', target: 1000, reward: 100, desc: '1プレイで 1000pt' },
+      { id: 'ta1', type: 'play_time_attack', target: 1, reward: 30, desc: 'タイムアタックをプレイ' },
+      { id: 'sd1', type: 'play_sudden_death', target: 1, reward: 30, desc: 'サドンデスをプレイ' }
+    ];
+
+    const getRandomMissions = (streak) => {
+      let pool = [...MISSION_POOL].sort(() => Math.random() - 0.5);
+      return pool.slice(0, 3).map(m => ({ ...m, current: 0, claimed: false }));
+    };
+
+    const normalizeStr = (str) => String(str).replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0)-0xFEE0)).replace(/\s+/g, '');
+
+    const StorageAPI = {
+      safeGet: (key, fallback = null) => { try { const v = window.localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } },
+      safeSet: (key, val) => { try { window.localStorage.setItem(key, JSON.stringify(val)); return true; } catch (e) { return false; } },
+      getStats: () => {
+        let stats = StorageAPI.safeGet('qalc_stats');
+        if (!stats || !stats.inventory) {
+          stats = {
+            totalExp: parseInt(window.localStorage.getItem('qalc_exp') || '0', 10),
+            streak: parseInt(window.localStorage.getItem('qalc_streak') || '0', 10),
+            lastDate: window.localStorage.getItem('qalc_last_date') || '',
+            coins: 100, inventory: { bases: ['b_dog'], hats: [], faces: [], props: [], themes: ['default'] },
+            equipped: { base: 'b_dog', hat: null, face: null, prop: null }, theme: 'default', missions: null, daily: {}
+          };
+        }
+        const todayStr = new Date().toLocaleDateString();
+        if (!stats.missions || stats.missions.date !== todayStr) stats.missions = { date: todayStr, list: getRandomMissions(stats.streak || 0) };
+        StorageAPI.safeSet('qalc_stats', stats); return stats;
+      },
+      saveStats: (stats) => StorageAPI.safeSet('qalc_stats', stats),
+      updateDailyAndMissions: (stats, exp, combo, playCount, gameMode, correctCount) => {
+        const today = new Date().toLocaleDateString();
+        if (!stats.daily) stats.daily = {}; if (!stats.daily[today]) stats.daily[today] = { exp: 0, count: 0 };
+        stats.daily[today].exp += exp; stats.daily[today].count += playCount; stats.totalExp = (stats.totalExp || 0) + exp;
+
+        if (stats.lastDate !== today) {
+          if (stats.lastDate) {
+            const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+            if (stats.lastDate === yesterday.toLocaleDateString()) stats.streak += 1; else stats.streak = 1;
+          } else stats.streak = 1;
+          stats.lastDate = today;
+        }
+
+        if (stats.missions && stats.missions.date === today) {
+          stats.missions.list.forEach(m => {
+            if (m.type === 'play' && !m.claimed) m.current += playCount;
+            if (m.type === 'combo' && !m.claimed && combo > m.current) m.current = combo;
+            if (m.type === 'score' && !m.claimed && exp > m.current) m.current = exp;
+            if (m.type === 'play_time_attack' && gameMode === 'TIME_ATTACK' && !m.claimed) m.current += playCount;
+            if (m.type === 'play_sudden_death' && gameMode === 'SUDDEN_DEATH' && !m.claimed) m.current += playCount;
+          });
+        }
+        return stats;
+      },
+      getMistakes: () => StorageAPI.safeGet('qalc_mistakes', []),
+      addMistakes: (newM) => {
+        if (!newM.length) return; let m = StorageAPI.getMistakes(); m = [...newM, ...m];
+        StorageAPI.safeSet('qalc_mistakes', Array.from(new Map(m.map(x => [x.q, x])).values()).slice(0, 50));
+      },
+      removeMistakes: (correctQs) => {
+        let m = StorageAPI.getMistakes(); const cSet = new Set(correctQs.map(q => q.q));
+        StorageAPI.safeSet('qalc_mistakes', m.filter(x => !cSet.has(x.q)));
+      },
+      getRawData: () => {
+        let data = StorageAPI.safeGet('qalc_problems', {});
+        const defaults = generateDynamicProblems();
+        let updated = false;
+        for (const [key, list] of Object.entries(defaults)) {
+          if (!data[key]) { data[key] = list; updated = true; }
+        }
+        if (updated || !Object.keys(data).length) StorageAPI.safeSet('qalc_problems', data);
+        return Object.keys(data).length ? data : defaults;
+      },
+      getProblemGroups: () => Object.keys(StorageAPI.getRawData()).map(key => ({ name: key, count: StorageAPI.getRawData()[key].length })),
+      getProblemsByGroup: (name) => StorageAPI.getRawData()[name] || [],
+      saveProblemSet: (name, problems) => { const data = StorageAPI.getRawData(); data[name] = problems; return StorageAPI.safeSet('qalc_problems', data); },
+      deleteProblemGroup: (name) => { const data = StorageAPI.getRawData(); delete data[name]; return StorageAPI.safeSet('qalc_problems', data); },
+      encodeCourse: (name, probs) => btoa(encodeURIComponent(JSON.stringify({ n: name, p: probs.map(p => `${p.q},${p.a.join('|')}`).join(';') }))),
+      decodeCourse: (code) => { try { const d = JSON.parse(decodeURIComponent(atob(code))); return { name: d.n, problems: d.p.split(';').map(s => { const [q, a] = s.split(','); return { q, a: a.split('|') }; }) }; } catch (e) { return null; } }
+    };
+
+    // ==========================================
+    // 3. UIコンポーネント
+    // ==========================================
+    const toastEvent = new EventTarget();
+    const showToast = (icon, title) => { toastEvent.dispatchEvent(new CustomEvent('show', { detail: { icon, title } })); };
+
+    const CustomToast = () => {
+      const [toasts, setToasts] = useState([]);
+      useEffect(() => {
+        const h = (e) => { const id = Date.now(); setToasts(p => [...p, { id, ...e.detail }]); setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3000); };
+        toastEvent.addEventListener('show', h); return () => toastEvent.removeEventListener('show', h);
+      }, []);
+      return (
+        <div className="fixed top-20 right-4 z-[9999] flex flex-col gap-2 pointer-events-none w-[90%] max-w-xs">
+          <AnimatePresence>
+            {toasts.map(t => (
+              <motion.div key={t.id} initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 50 }} className="bg-[var(--panel)] border-2 border-[var(--border)] text-[var(--text)] px-4 py-3 rounded-2xl shadow-sm flex items-center gap-3 font-bold text-sm">
+                <i className={`bi ${t.icon==='error'?'bi-heartbreak text-[var(--primary)]':'bi-check-circle-fill text-[var(--secondary)]'} text-2xl`}></i>
+                <span>{t.title}</span>
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </div>
+      );
+    };
+
+    const getLevelInfo = (exp) => {
+      const level = Math.floor(Math.cbrt(exp / 200)) + 1; const curr = 200 * Math.pow(level - 1, 3); const next = 200 * Math.pow(level, 3);
+      const prog = ((exp - curr) / (next - curr)) * 100;
+      const r = [{ m: 100, t: "計算神", b: "🌌", c: "var(--text)" }, { m: 50, t: "マスター", b: "👑", c: "var(--accent)" }, { m: 20, t: "上級", b: "🥇", c: "var(--accent)" }, { m: 0, t: "かけだし", b: "🌱", c: "var(--secondary)" }].find(x => level >= x.m);
+      return { level, title: r.t, badge: r.b, color: r.c, progress: prog, nextLevelExp: next };
+    };
+
+    const LayeredAvatar = React.memo(({ equipped, size = "text-5xl" }) => {
+      const getC = (cat, id) => { const i = SHOP_ITEMS[cat].find(x => x.id === id); return i ? i.char : null; };
+      return (
+        <div className={`relative flex items-center justify-center aspect-square ${size}`}>
+          <span className="absolute z-10 drop-shadow-sm">{getC('bases', equipped.base) || '🐶'}</span>
+          {equipped.face && <span className="absolute z-20 text-[0.8em] top-[15%] drop-shadow-sm">{getC('faces', equipped.face)}</span>}
+          {equipped.hat && <span className="absolute z-30 text-[0.8em] -top-[25%] -rotate-12 drop-shadow-sm">{getC('hats', equipped.hat)}</span>}
+          {equipped.prop && <span className="absolute z-40 text-[0.7em] -bottom-[10%] -right-[10%] rotate-12 drop-shadow-sm">{getC('props', equipped.prop)}</span>}
+        </div>
+      );
+    });
+
+    const PageWrapper = ({ children, keyName }) => (
+      <motion.div key={keyName} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{duration: 0.2}} className="absolute inset-0 flex flex-col overflow-y-auto p-4 no-scrollbar">
+        <div className="m-auto w-full max-w-lg">{children}</div>
+      </motion.div>
+    );
+
+    const MotionButton = ({ children, onClick, className, ...props }) => (
+      <motion.button whileHover={{ filter: 'brightness(0.95)' }} whileTap={{ scale: 0.98, y: 2 }} onClick={() => { audioCtrl.playSE('click'); if(onClick) onClick(); }} className={`btn-pop flex items-center justify-center gap-2 select-none ${className}`} {...props}>
+        {children}
+      </motion.button>
+    );
+
+    const MathText = React.memo(({ text }) => {
+      if (!text) return null;
+      return (
+        <span className="flex items-center justify-center flex-wrap">
+          {text.split(/(\d+\/\d+)/g).map((part, index) => {
+            const m = part.match(/(\d+)\/(\d+)/);
+            if (m) return (
+              <span key={index} className="inline-flex flex-col align-middle text-center text-[0.7em] mx-1 -mt-2">
+                <span className="border-b-[3px] border-current px-1 leading-[1.1]">{m[1]}</span><span className="px-1 leading-[1.1]">{m[2]}</span>
+              </span>
+            );
+            return <span key={index}>{part}</span>;
+          })}
+        </span>
+      );
+    });
+
+    const HandWritingCanvas = forwardRef((props, ref) => {
+      const canvasRef = useRef(null); const isDrawing = useRef(false); const lastPos = useRef({ x: 0, y: 0 });
+      useImperativeHandle(ref, () => ({ clear: () => { const cvs = canvasRef.current; if (cvs) cvs.getContext('2d').clearRect(0, 0, cvs.width, cvs.height); } }));
+      useEffect(() => {
+        const cvs = canvasRef.current; if (!cvs) return; const ctx = cvs.getContext('2d');
+        const resize = () => {
+          if (!cvs.parentElement) return; const rect = cvs.parentElement.getBoundingClientRect(); const newW = Math.round(rect.width); const newH = Math.round(rect.height);
+          if (Math.abs(cvs.width - newW) > 1 || Math.abs(cvs.height - newH) > 1) {
+            const tmp = document.createElement('canvas'); tmp.width = cvs.width || newW; tmp.height = cvs.height || newH;
+            if (cvs.width > 0) tmp.getContext('2d').drawImage(cvs, 0, 0);
+            cvs.width = newW; cvs.height = newH; ctx.strokeStyle = 'var(--text)'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.drawImage(tmp, 0, 0);
+          }
+        };
+        const obs = new ResizeObserver(resize); obs.observe(cvs.parentElement);
+        const getP = (e) => { const r = cvs.getBoundingClientRect(); const cx = e.touches ? e.touches[0].clientX : e.clientX; const cy = e.touches ? e.touches[0].clientY : e.clientY; return { x: cx - r.left, y: cy - r.top }; };
+        const start = (e) => { e.preventDefault(); isDrawing.current = true; lastPos.current = getP(e); };
+        const draw = (e) => { if (!isDrawing.current) return; e.preventDefault(); const p = getP(e); ctx.beginPath(); ctx.moveTo(lastPos.current.x, lastPos.current.y); ctx.lineTo(p.x, p.y); ctx.stroke(); lastPos.current = p; };
+        const stop = () => { isDrawing.current = false; };
+        cvs.addEventListener('touchstart', start, { passive: false }); cvs.addEventListener('touchmove', draw, { passive: false }); cvs.addEventListener('touchend', stop);
+        cvs.addEventListener('pointerdown', start); cvs.addEventListener('pointermove', draw); cvs.addEventListener('pointerup', stop);
+        return () => obs.disconnect();
+      }, []);
+      return (
+        <div className="w-full h-full relative rounded-3xl overflow-hidden border-2 border-[var(--border)] bg-[var(--panel)] shadow-inner">
+          <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(var(--text) 1.5px, transparent 1.5px)', backgroundSize: '20px 20px' }}></div>
+          <canvas ref={canvasRef} className="w-full h-full relative z-10 touch-none" />
+          <motion.button whileTap={{ scale: 0.8 }} className="absolute top-4 right-4 w-12 h-12 bg-[var(--panel)] border-2 border-[var(--border)] rounded-full flex items-center justify-center text-[var(--primary)] z-20 shadow-sm" onClick={() => ref.current?.clear()}><i className="bi bi-trash text-xl"></i></motion.button>
+        </div>
+      );
+    });
+
+    const useExternalScripts = () => {
+      const [l, setL] = useState(false);
+      useEffect(() => {
+        const load = (src) => new Promise((r) => { if (document.querySelector(`script[src="${src}"]`)) return r(); const s = document.createElement('script'); s.src = src; s.onload = r; document.head.appendChild(s); });
+        Promise.all([load('https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js'), load('https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js')]).then(() => setL(true));
+      }, []); return l;
+    };
+
+    // ==========================================
+    // 4. 各画面 View コンポーネント
+    // ==========================================
+    const HomeView = ({ setView, stats, setStats, setConfigMode, initHost }) => {
+      const { level, title, badge, color, progress, nextLevelExp } = getLevelInfo(stats.totalExp);
+      const claim = (id) => {
+        let n = { ...stats }; const m = n.missions.list.find(x => x.id === id);
+        if (m && m.current >= m.target && !m.claimed) { audioCtrl.playSE('coin'); m.claimed = true; n.coins += m.reward; StorageAPI.saveStats(n); setStats(n); showToast('success', `${m.reward}コインゲット！`); }
+      };
+      return (
+        <div className="flex flex-col items-center gap-4 pb-10">
+          <div className="text-center mt-2 mb-2">
+            <h2 className="font-black text-5xl tracking-widest text-[var(--text)]">Qalc<span className="text-[var(--primary)]">.</span></h2>
+          </div>
+          <div className="w-full card-pop p-5 relative">
+            <div className="absolute top-3 right-3 flex items-center gap-1 font-bold text-sm bg-[var(--panel)] px-3 py-1 rounded-full border-2 border-[var(--border)] text-[var(--text)]"><i className="bi bi-coin text-[var(--accent)]"></i> {stats.coins}</div>
+            <div className="flex items-center gap-4 mt-2">
+              <div className="bg-[var(--bg)] rounded-2xl w-[80px] h-[80px] border-2 border-[var(--border)] overflow-hidden"><LayeredAvatar equipped={stats.equipped} /></div>
+              <div className="flex-grow">
+                <div className="text-xs font-bold opacity-70 mb-1"><span style={{ color }}>{badge} {title}</span></div>
+                <div className="text-3xl font-black tracking-wide text-[var(--text)]">Lv.{level}</div>
+              </div>
+            </div>
+            <div className="w-full mt-4 h-3 bg-[var(--bg)] rounded-full overflow-hidden border border-[var(--border)]">
+              <motion.div initial={{ width: 0 }} animate={{ width: `${progress}%` }} className="h-full bg-[var(--secondary)]"></motion.div>
+            </div>
+            <div className="text-right text-[10px] font-bold opacity-50 mt-2">NEXT: {Math.floor(nextLevelExp - stats.totalExp)} pt</div>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-2 w-full">
+            <MotionButton className="bg-[var(--panel)] text-[var(--text)] p-3 flex-col h-auto" onClick={() => { setConfigMode('SCORE_ATTACK'); setView('singleConfig'); }}>
+              <i className="bi bi-award text-2xl text-[var(--accent)] mb-1"></i> <span className="text-[10px]">スコア</span>
+            </MotionButton>
+            <MotionButton className="bg-[var(--panel)] text-[var(--text)] p-3 flex-col h-auto" onClick={() => { setConfigMode('TIME_ATTACK'); setView('singleConfig'); }}>
+              <i className="bi bi-stopwatch text-2xl text-[var(--secondary)] mb-1"></i> <span className="text-[10px]">タイム</span>
+            </MotionButton>
+            <MotionButton className="bg-[var(--panel)] text-[var(--text)] p-3 flex-col h-auto" onClick={() => { setConfigMode('SUDDEN_DEATH'); setView('singleConfig'); }}>
+              <i className="bi bi-lightning text-2xl text-[var(--primary)] mb-1"></i> <span className="text-[10px]">サドンデス</span>
+            </MotionButton>
+          </div>
+
+          <div className="w-full flex flex-col gap-2 mt-2">
+            <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-lg border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={initHost}>
+              <i className="bi bi-people"></i> みんなであそぶ (へやを作る)
+            </MotionButton>
+            <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-4 text-lg border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={() => setView('clientJoin')}>
+              <i className="bi bi-person"></i> へやに入る
+            </MotionButton>
+          </div>
+
+          <div className="w-full card-pop p-4 mt-2">
+            <h4 className="font-bold mb-3 flex items-center gap-2 text-sm"><i className="bi bi-check-circle-fill text-[var(--secondary)]"></i> 今日のミッション</h4>
+            <div className="flex flex-col gap-2">
+              {stats.missions?.list.map(m => {
+                const c = m.current >= m.target;
+                return (
+                  <div key={m.id} className="flex items-center justify-between bg-[var(--bg)] p-2 rounded-xl">
+                    <div className="flex flex-col pr-2"><span className={`text-xs font-bold ${c ? 'text-[var(--secondary)] line-through' : ''}`}>{m.desc}</span><span className="text-[10px] opacity-60 font-bold">{Math.min(m.current, m.target)} / {m.target}</span></div>
+                    {c ? (m.claimed ? <span className="opacity-40 font-bold text-xs"><i className="bi bi-check"></i> 完了</span> : <button onClick={() => claim(m.id)} className="bg-[var(--accent)] text-[var(--text)] font-bold text-xs px-3 py-1 rounded border border-[var(--border)]">うけとる</button>) : <span className="font-bold text-xs opacity-60"><i className="bi bi-coin text-[var(--accent)]"></i> {m.reward}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="w-full flex gap-2 mt-2">
+            <MotionButton className="bg-[var(--panel)] py-3 flex-1 text-sm" onClick={() => setView('shop')}><i className="bi bi-shop"></i> きせかえ</MotionButton>
+            <MotionButton className="bg-[var(--panel)] py-3 flex-1 text-sm" onClick={() => setView('manager')}><i className="bi bi-gear"></i> コース管理</MotionButton>
+          </div>
+        </div>
+      );
+    };
+
+    const SingleConfigView = ({ setView, setState, configMode }) => {
+      const [groups, setGroups] = useState([]); const [sel, setSel] = useState(''); const [time, setTime] = useState(3);
+      const [selectedGrade, setSelectedGrade] = useState('すべて');
+      const grades = ['すべて', '1年', '2年', '3年', '4年', '5年', '6年', 'その他'];
+
+      useEffect(() => { const l = StorageAPI.getProblemGroups(); if (StorageAPI.getMistakes().length > 0) l.unshift({ name: 'mistakes', count: StorageAPI.getMistakes().length, d: '★ にがて克服' }); setGroups(l); }, []);
+
+      const filteredGroups = groups.filter(g => {
+        if (g.name === 'mistakes') return true;
+        if (selectedGrade === 'すべて') return true;
+        if (selectedGrade === 'その他') return !/^[1-6]年/.test(g.name);
+        return g.name.startsWith(selectedGrade);
+      });
+
+      useEffect(() => {
+        if (filteredGroups.length > 0) {
+          if (!filteredGroups.find(g => g.name === sel)) {
+            setSel(filteredGroups[0].name);
+          }
+        } else {
+          setSel('');
+        }
+      }, [selectedGrade, groups]);
+
+      const start = () => {
+        if (!sel) return showToast('warning', 'コースを選択してね');
+        let p = sel === 'mistakes' ? StorageAPI.getMistakes() : StorageAPI.getProblemsByGroup(sel);
+        if (!p.length) return showToast('error', '問題がありません');
+        p = [...p].sort(() => Math.random() - 0.5); if (configMode === 'TIME_ATTACK') p = p.slice(0, 20);
+        setState({ timeLimitSec: configMode === 'SCORE_ATTACK' ? time * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: String(x.a).split('|') })), courseName: sel, gameMode: configMode });
+        setView('game');
+      };
+      return (
+        <div className="card-pop p-6 flex flex-col gap-5 mt-8">
+          <h3 className="font-black text-xl text-center flex justify-center gap-2 text-[var(--text)]">
+            <i className={`bi ${configMode==='SCORE_ATTACK'?'bi-award text-[var(--accent)]':configMode==='TIME_ATTACK'?'bi-stopwatch text-[var(--secondary)]':'bi-lightning text-[var(--primary)]'}`}></i> 
+            {configMode === 'SCORE_ATTACK' ? 'スコアアタック' : configMode === 'TIME_ATTACK' ? 'タイムアタック' : 'サドンデス'}
+          </h3>
+          <div>
+            <label className="text-xs font-bold opacity-70 mb-2 block">学年</label>
+            <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+              {grades.map(grade => (
+                <button 
+                  key={grade}
+                  onClick={() => { audioCtrl.playSE('click'); setSelectedGrade(grade); }}
+                  className={`px-4 py-2 rounded-full whitespace-nowrap font-bold text-sm border-2 transition-colors flex-shrink-0 ${selectedGrade === grade ? 'bg-[var(--text)] border-[var(--text)] text-[var(--panel)] shadow-sm' : 'bg-[var(--bg)] border-transparent text-[var(--text)]'}`}
+                >
+                  {grade.includes('年') ? <>{grade.replace('年', '')}<ruby>年<rt>ねん</rt></ruby></> : grade}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-bold opacity-70 mb-1 block">コースをえらぶ</label>
+            <select className="w-full border-2 rounded-xl p-3 font-bold border-[var(--border)] bg-[var(--bg)] text-[var(--text)] outline-none" value={sel} onChange={e => { audioCtrl.playSE('click'); setSel(e.target.value); }}>
+              {filteredGroups.map(g => <option key={g.name} value={g.name}>{g.d || g.name} ({g.count}問)</option>)}
+            </select>
+          </div>
+          {configMode === 'SCORE_ATTACK' && (
+            <div>
+              <label className="font-bold text-sm flex justify-between mb-2"><span className="opacity-70">制限時間</span><span className="text-[var(--primary)]">{time} 分</span></label>
+              <input type="range" min="1" max="10" value={time} onChange={e => setTime(e.target.value)} className="w-full accent-[var(--primary)]" />
+            </div>
+          )}
+          <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-xl mt-4 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={start}>スタート！</MotionButton>
+          <button className="opacity-50 font-bold py-2 hover:opacity-100 transition-opacity" onClick={() => { audioCtrl.playSE('click'); setView('home') }}>もどる</button>
+        </div>
+      );
+    };
+
+    const HostRoomView = ({ peerState, setPeerState, broadcast, setView, setState, configMode, setConfigMode }) => {
+      const [groups, setGroups] = useState([]); const [sel, setSel] = useState(''); const [time, setTime] = useState(3);
+      const [selectedGrade, setSelectedGrade] = useState('すべて');
+      const grades = ['すべて', '1年', '2年', '3年', '4年', '5年', '6年', 'その他'];
+
+      useEffect(() => { const l = StorageAPI.getProblemGroups(); setGroups(l); }, []);
+      
+      const filteredGroups = groups.filter(g => {
+        if (selectedGrade === 'すべて') return true;
+        if (selectedGrade === 'その他') return !/^[1-6]年/.test(g.name);
+        return g.name.startsWith(selectedGrade);
+      });
+
+      useEffect(() => {
+        if (filteredGroups.length > 0) {
+          if (!filteredGroups.find(g => g.name === sel)) {
+            setSel(filteredGroups[0].name);
+          }
+        } else {
+          setSel('');
+        }
+      }, [selectedGrade, groups]);
+
+      useEffect(() => { if (peerState.hostId && window.QRCode) { document.getElementById('qr').innerHTML=''; new window.QRCode(document.getElementById('qr'), { text: `${window.location.origin}${window.location.pathname}?host=${peerState.hostId}`, width: 120, height: 120, colorDark: "#4A4E69", colorLight: "#ffffff" }); } }, [peerState.hostId]);
+      const start = () => {
+        let p = StorageAPI.getProblemsByGroup(sel); if (!p.length) return showToast('error', '問題なし');
+        p = [...p].sort(() => Math.random() - 0.5); if (configMode === 'TIME_ATTACK') p = p.slice(0, 20);
+        const conf = { timeLimitSec: configMode === 'SCORE_ATTACK' ? time * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: String(x.a).split('|') })), courseName: sel, gameMode: configMode };
+        setPeerState(ps => { const n = { ...ps, participants: {} }; Object.keys(ps.participants).forEach(k => n.participants[k] = { ...ps.participants[k], score: 0 }); n.participants[ps.hostId] = { id: ps.hostId, name: 'リーダー', score: 0 }; n.connections.forEach(c => c.send({ type: 'participants_update', data: n.participants })); return n; });
+        setState(conf); broadcast({ type: 'game_start', data: conf }); setView('game');
+      };
+      return (
+        <div className="flex flex-col h-[85vh] gap-3">
+          <div className="card-pop p-4 flex flex-col items-center flex-grow overflow-y-auto">
+            <h4 className="font-black text-4xl tracking-widest text-[var(--primary)] mb-2">{peerState.hostId}</h4>
+            <div id="qr" className="bg-white p-2 rounded-xl mb-4 border-2 border-[var(--border)]"></div>
+            
+            <div className="w-full mb-3">
+              <label className="text-xs font-bold opacity-70 mb-2 block">学年</label>
+              <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
+                {grades.map(grade => (
+                  <button 
+                    key={grade}
+                    onClick={() => { audioCtrl.playSE('click'); setSelectedGrade(grade); }}
+                    className={`px-4 py-2 rounded-full whitespace-nowrap font-bold text-sm border-2 transition-colors flex-shrink-0 ${selectedGrade === grade ? 'bg-[var(--text)] border-[var(--text)] text-[var(--panel)] shadow-sm' : 'bg-[var(--bg)] border-transparent text-[var(--text)]'}`}
+                  >
+                    {grade.includes('年') ? <>{grade.replace('年', '')}<ruby>年<rt>ねん</rt></ruby></> : grade}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <select className="w-full border-2 rounded-xl p-3 font-bold mb-4 bg-[var(--bg)] border-[var(--border)] outline-none" value={sel} onChange={e => setSel(e.target.value)}>
+              {filteredGroups.map(g => <option key={g.name} value={g.name}>{g.name} ({g.count}問)</option>)}
+            </select>
+            {configMode === 'SCORE_ATTACK' && <input type="range" min="1" max="10" value={time} onChange={e => setTime(e.target.value)} className="w-full mb-4 accent-[var(--primary)]" />}
+            <div className="w-full bg-[var(--bg)] p-3 rounded-xl border-2 border-[var(--border)] overflow-y-auto max-h-40">
+              {Object.values(peerState.participants).map(p => <div key={p.id} className="font-bold border-b border-[var(--border)] py-2 text-sm">{p.name} <span className="float-right text-[var(--primary)]">{p.score}pt</span></div>)}
+            </div>
+          </div>
+          <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={start}>全員でスタート！</MotionButton>
+        </div>
+      );
+    };
+
+    const ClientJoinView = ({ initClient, urlHostId, setView }) => {
+      const [name, setName] = useState(''); const [id, setId] = useState(urlHostId || '');
+      return (
+        <div className="card-pop p-6 text-center mt-10">
+          <h3 className="font-black text-2xl mb-6 text-[var(--text)]"><i className="bi bi-person-plus text-[var(--secondary)]"></i> へやに入る</h3>
+          <div className="text-left mb-4">
+            <label className="text-xs font-bold opacity-70 ml-1">ルーム番号</label>
+            <input type="text" className="w-full border-2 border-[var(--border)] rounded-xl p-3 font-black text-2xl text-center bg-[var(--bg)] outline-none focus:border-[var(--secondary)] transition-colors" placeholder="123456" value={id} onChange={e => setId(e.target.value.replace(/[^0-9]/g, ''))} />
+          </div>
+          <div className="text-left mb-8">
+            <label className="text-xs font-bold opacity-70 ml-1">あなたのなまえ</label>
+            <input type="text" className="w-full border-2 border-[var(--border)] rounded-xl p-3 font-bold text-xl text-center bg-[var(--bg)] outline-none focus:border-[var(--secondary)] transition-colors" placeholder="なまえ" value={name} onChange={e => setName(e.target.value)} />
+          </div>
+          <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={() => initClient(name, id)}>入る！</MotionButton>
+          <button className="opacity-50 font-bold mt-6 hover:opacity-100 transition-opacity" onClick={() => setView('home')}>もどる</button>
+        </div>
+      );
+    };
+
+    const ClientWaitView = ({ peerState, leaveRoom }) => (
+      <div className="card-pop p-8 text-center mt-10">
+        <div className="animate-spin text-5xl mb-6"><i className="bi bi-arrow-repeat text-[var(--secondary)]"></i></div>
+        <h3 className="font-black text-2xl mb-4 text-[var(--text)]">準備OK！</h3><p className="font-bold mb-8 opacity-70">リーダーがスタートするまで<br/>待ってね</p>
+        <button className="opacity-50 font-bold underline hover:opacity-100 transition-opacity" onClick={leaveRoom}>やめる</button>
+      </div>
+    );
+
+    const GameView = ({ state, setState, setView, stats, setStats, peerState, setPeerState }) => {
+      const [score, setScore] = useState(0); const [combo, setCombo] = useState(0); const [maxCombo, setMaxCombo] = useState(0);
+      const [qIndex, setQIndex] = useState(0); const [ans, setAns] = useState(''); const [correctCount, setCorrectCount] = useState(0);
+      const [startT] = useState(Date.now()); const [currT, setCurrT] = useState(Date.now());
+      const elap = Math.floor((currT - startT) / 1000); const rem = Math.max(0, state.timeLimitSec - elap);
+      const [memo, setMemo] = useState(false); const canvasRef = useRef(null); const mistakesRef = useRef([]);
+
+      const isM = peerState && peerState.role;
+      const top3 = isM ? Object.values(peerState.participants).sort((a,b)=>b.score-a.score).slice(0,3) : [];
+
+      useEffect(() => { let id; const u = () => { setCurrT(Date.now()); id = requestAnimationFrame(u); }; u(); return () => cancelAnimationFrame(id); }, []);
+      useEffect(() => {
+        if (isM) {
+          if (peerState.role === 'client' && peerState.conn) peerState.conn.send({ type: 'score_update', data: { score, combo } });
+          else if (peerState.role === 'host') setPeerState(p => { if (!p.participants[p.hostId]) return p; const n = { ...p, participants: { ...p.participants, [p.hostId]: { ...p.participants[p.hostId], score, combo } } }; n.connections.forEach(c => c.send({ type: 'participants_update', data: n.participants })); return n; });
+        }
+      }, [score, combo]);
+      useEffect(() => { if (state.gameMode === 'SCORE_ATTACK' && rem <= 0) finish(); }, [rem]);
+
+      const finish = () => {
+        if (mistakesRef.current.length > 0) StorageAPI.addMistakes(mistakesRef.current);
+        if (state.courseName === 'にがて克服') StorageAPI.removeMistakes(state.problemSet.filter(p => !mistakesRef.current.some(m => m.q === p.q)));
+        let n = { ...stats }; const sec = Number(((Date.now() - startT) / 1000).toFixed(1));
+        let baseExp = score;
+        if (state.gameMode === 'TIME_ATTACK') baseExp = 1000 + Math.max(0, Math.floor(120 - sec) * 10);
+        if (state.gameMode === 'SUDDEN_DEATH') baseExp = correctCount * 50;
+        n = StorageAPI.updateDailyAndMissions(n, baseExp, maxCombo, 1, state.gameMode, correctCount);
+        StorageAPI.saveStats(n); setStats(n);
+        setState(p => ({ ...p, finalScore: baseExp, finalCombo: maxCombo, finalTime: sec, finalCorrect: correctCount, earnedExp: baseExp, previousExp: stats.totalExp, mistakes: mistakesRef.current }));
+        if (isM) { if (peerState.role === 'client') peerState.conn.send({ type: 'game_finish', data: { finalScore: baseExp } }); else peerState.connections.forEach(c => c.send({ type: 'game_finish' })); }
+        setView('result');
+      };
+
+      const submit = () => {
+        if (!ans) return; const q = state.problemSet[qIndex]; const normAns = normalizeStr(ans);
+        if (q.a.some(a => normalizeStr(a) === normAns)) {
+          const nc = combo + 1; audioCtrl.playSE('correct'); if (nc > 1) audioCtrl.playSE('combo', nc);
+          if (nc % 10 === 0) triggerConfetti({ particleCount: 50, spread: 60, origin: { y: 0.8 }, zIndex: 9999 });
+          setScore(s => s + 100 + (combo * 10)); setCombo(nc); setMaxCombo(m => Math.max(m, nc)); setCorrectCount(c => c + 1);
+          setAns(''); canvasRef.current?.clear();
+          if (state.gameMode === 'TIME_ATTACK' && correctCount + 1 >= state.problemSet.length) setTimeout(finish, 500);
+          else setQIndex(i => (i + 1) % state.problemSet.length);
+        } else {
+          audioCtrl.playSE('wrong'); setCombo(0); setAns(''); mistakesRef.current.push({ q: q.q, a: q.a.join('|') });
+          if (state.gameMode === 'SUDDEN_DEATH') setTimeout(finish, 500);
+        }
+      };
+
+      useEffect(() => { if (ans && state.problemSet[qIndex].a.some(a => normalizeStr(a) === normalizeStr(ans))) submit(); }, [ans]);
+
+      const q = state.problemSet[qIndex] || { q: '?', a: ['?'] };
+      const dSec = state.gameMode === 'SCORE_ATTACK' ? rem : elap;
+      const prog = state.gameMode === 'SCORE_ATTACK' ? (rem / state.timeLimitSec) * 100 : (correctCount / state.problemSet.length) * 100;
+
+      return (
+        <div className="absolute inset-0 flex flex-col z-10 bg-[var(--bg)]">
+          {state.gameMode !== 'SUDDEN_DEATH' && <div className="h-2 w-full bg-[var(--border)] relative"><div className="h-full bg-[var(--secondary)] transition-all duration-200" style={{ width: `${prog}%` }}></div></div>}
+          {isM && top3.length > 0 && (
+            <div className="flex justify-center gap-2 p-2 bg-[var(--panel)] border-b-2 border-[var(--border)] shadow-sm">
+              {top3.map((p, i) => <div key={p.id} className="text-[10px] font-bold bg-[var(--bg)] px-3 py-1 rounded-full border border-[var(--border)]">{i+1}位 {p.name}: <span className="text-[var(--primary)]">{p.score}</span></div>)}
+            </div>
+          )}
+          <div className={`flex flex-col md:flex-row h-full p-4 gap-4 ${memo ? 'md:w-full' : 'max-w-lg mx-auto w-full'}`}>
+            <div className="flex flex-col flex-1 shrink-0">
+              <div className="flex justify-between font-black text-2xl mb-2 opacity-80"><span className={state.gameMode==='SCORE_ATTACK'&&rem<=10?'text-red-500 animate-pulse':''}><i className="bi bi-clock"></i> {Math.floor(dSec/60)}:{(dSec%60).toString().padStart(2,'0')}</span><span className="text-[var(--primary)]">{state.gameMode==='TIME_ATTACK'?`${correctCount}/${state.problemSet.length}問`:state.gameMode==='SUDDEN_DEATH'?`${correctCount}問`:`${score}pt`}</span></div>
+              <div className="flex-grow flex flex-col justify-center items-center relative min-h-[120px]">
+                {combo > 1 && <div className="absolute top-0 bg-[var(--accent)] px-4 py-1 rounded-full font-black text-sm border-2 border-white shadow-sm text-white">{combo} COMBO!</div>}
+                <div className="text-4xl sm:text-5xl md:text-6xl font-black break-words w-full text-center leading-tight text-[var(--text)] tracking-wider"><MathText text={q.q} /></div>
+              </div>
+              <div className="h-20 bg-[var(--panel)] border-2 border-[var(--border)] rounded-2xl flex items-center justify-center relative mb-4 shadow-sm">
+                <span className="text-4xl font-black text-[var(--secondary)] tracking-widest">{ans || <span className="opacity-20">?</span>}</span>
+                <button className={`absolute right-3 w-12 h-12 rounded-full flex items-center justify-center text-xl transition-colors ${memo?'bg-[var(--secondary)] text-white shadow-md':'bg-[var(--bg)] text-[var(--text)] opacity-50'}`} onClick={()=>{audioCtrl.playSE('click'); setMemo(!memo)}}><i className="bi bi-pen"></i></button>
+              </div>
+              <div className="grid grid-cols-4 gap-2 h-48 shrink-0">
+                <div className="col-span-3 grid grid-cols-3 gap-2">
+                  {['7','8','9','4','5','6','1','2','3','.','0','C'].map(n => (
+                    <button key={n} className={`num-key ${n==='C'?'!bg-gray-300 !text-white !border-gray-300 !shadow-[0_4px_0_#9ca3af]':''}`} onPointerDown={(e)=>{e.preventDefault(); audioCtrl.playSE('click'); n==='C'?setAns(''):setAns(a=>a.length<15?a+n:a)}}>{n}</button>
+                  ))}
+                </div>
+                <div className="flex flex-col gap-2">
+                  {['/','-','(',')'].map(c => <button key={c} className="symbol-key" onPointerDown={(e)=>{e.preventDefault(); audioCtrl.playSE('click'); setAns(a=>a.length<15?a+c:a)}}>{c}</button>)}
+                  <button className="flex-[2] bg-[var(--secondary)] text-white rounded-[16px] font-black text-xl border-2 border-[var(--secondary)] shadow-[0_4px_0_rgba(0,0,0,0.1)] active:shadow-none active:translate-y-1 transition-all outline-none" onPointerDown={(e)=>{e.preventDefault(); submit()}}>OK</button>
+                </div>
+              </div>
+            </div>
+            {memo && <div className="flex-1 min-h-[300px] h-full"><HandWritingCanvas ref={canvasRef} /></div>}
+          </div>
+        </div>
+      );
+    };
+
+    const ResultView = ({ state, setView, peerState, leaveRoom }) => {
+      const { earnedExp, previousExp, finalScore, finalCombo, finalTime, finalCorrect } = state;
+      const { level, title, badge } = getLevelInfo(previousExp + earnedExp);
+      const lvlUp = level > getLevelInfo(previousExp).level;
+      useEffect(() => { triggerConfetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#E07A5F', '#81B29A', '#F2CC8F'] }); if(lvlUp) audioCtrl.playSE('combo', 10); }, []);
+      const isM = peerState && peerState.role;
+      const ranks = isM ? Object.values(peerState.participants).sort((a,b)=>b.score-a.score) : [];
+      return (
+        <div className="flex flex-col h-full py-6">
+          <h2 className="font-black text-5xl text-center text-[var(--primary)] mb-6 tracking-widest">FINISH!</h2>
+          {isM ? (
+            <div className="card-pop p-4 mb-6 flex-grow overflow-y-auto">
+              <h3 className="font-black text-xl mb-4 text-center text-[var(--text)]">ランキング</h3>
+              {ranks.map((p,i) => <div key={p.id} className="flex justify-between items-center border-b border-[var(--border)] p-3 font-bold"><span className="text-lg text-[var(--text)]">{i+1}位 {p.name}</span><span className="text-2xl text-[var(--primary)]">{p.score}pt</span></div>)}
+            </div>
+          ) : (
+            <div className="card-pop p-8 text-center mb-6">
+              <h4 className="font-bold opacity-70 mb-2 text-[var(--text)]">{state.gameMode==='TIME_ATTACK'?'CLEAR TIME':state.gameMode==='SUDDEN_DEATH'?'連続正解':'SCORE'}</h4>
+              <div className="text-7xl font-black text-[var(--primary)] mb-4">{state.gameMode==='TIME_ATTACK'?`${finalTime}秒`:state.gameMode==='SUDDEN_DEATH'?`${finalCorrect}問`:finalScore}</div>
+              <div className="text-xl font-bold text-[var(--secondary)] mb-4 bg-[var(--bg)] inline-block px-4 py-1 rounded-full border border-[var(--border)]">+{earnedExp} EXP!</div>
+              {lvlUp && <div className="text-2xl font-black text-[var(--accent)] animate-bounce mt-2">レベルアップ！ {badge} {title}</div>}
+            </div>
+          )}
+          {state.mistakes.length > 0 && (
+            <div className="card-pop p-4 mb-6 max-h-48 overflow-y-auto">
+              <h4 className="font-bold text-[var(--primary)] mb-3 flex items-center gap-2"><i className="bi bi-pen"></i> おさらい</h4>
+              {state.mistakes.map((m,i)=><div key={i} className="text-sm font-bold border-b border-dashed border-[var(--border)] py-2 text-[var(--text)]">{m.q} <i className="bi bi-arrow-right opacity-50 mx-2"></i> <span className="text-[var(--primary)] text-lg">{m.a.join(' または ')}</span></div>)}
+            </div>
+          )}
+          {isM ? (
+            <div className="flex flex-col gap-3 mt-auto">
+              {peerState.role === 'host' && <MotionButton className="bg-[var(--secondary)] text-white w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={()=>setView('hostRoom')}>もう一回あそぶ</MotionButton>}
+              <button className="font-bold opacity-50 py-3 hover:opacity-100 transition-opacity" onClick={leaveRoom}>退出してホームへ</button>
+            </div>
+          ) : <MotionButton className="bg-[var(--text)] text-white w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)] mt-auto" onClick={()=>setView('home')}>ホームへもどる</MotionButton>}
+        </div>
+      );
+    };
+
+    const ShopView = ({ setView, stats, setStats }) => {
+      const [tab, setTab] = useState('bases');
+      const buy = (i, c) => {
+        let n = {...stats}; if(n.coins < i.price) return showToast('error', 'コインが足りません');
+        n.coins -= i.price; n.inventory[c].push(i.id);
+        if(c==='themes') n.theme = i.id; else n.equipped[c.slice(0,-1)] = i.id;
+        audioCtrl.playSE('coin'); showToast('success', '購入しました'); StorageAPI.saveStats(n); setStats(n);
+      };
+      const equip = (i, c) => {
+        let n = {...stats}; if(c==='themes') n.theme = i.id; else { let p = c.slice(0,-1); n.equipped[p] = n.equipped[p]===i.id ? null : i.id; }
+        audioCtrl.playSE('click'); StorageAPI.saveStats(n); setStats(n);
+      };
+      return (
+        <div className="flex flex-col h-[85vh] mt-4">
+          <div className="flex justify-between items-center mb-6"><h3 className="font-bold text-xl text-[var(--text)]"><i className="bi bi-shop text-[var(--secondary)]"></i> きせかえ</h3><span className="font-black bg-[var(--panel)] text-[var(--text)] px-4 py-1.5 rounded-full border-2 border-[var(--border)] shadow-sm"><i className="bi bi-coin text-[var(--accent)]"></i> {stats.coins}</span></div>
+          <div className="flex gap-4 mb-4 h-24">
+            <div className="w-24 h-24 bg-[var(--bg)] border-2 border-[var(--border)] rounded-2xl overflow-hidden shadow-inner"><LayeredAvatar equipped={stats.equipped} size="text-6xl"/></div>
+            <div className="flex-grow grid grid-cols-3 gap-2 content-start">{[{id:'bases',l:'ベース'},{id:'hats',l:'ぼうし'},{id:'faces',l:'かお'},{id:'props',l:'もちもの'},{id:'themes',l:'テーマ'}].map(t => <button key={t.id} onClick={()=>{audioCtrl.playSE('click'); setTab(t.id)}} className={`font-bold text-[10px] rounded-lg border-2 transition-colors py-1.5 ${tab===t.id?'bg-[var(--text)] text-[var(--panel)] border-[var(--text)]':'bg-[var(--panel)] text-[var(--text)] border-[var(--border)]'}`}>{t.l}</button>)}</div>
+          </div>
+          <div className="card-pop flex-grow overflow-y-auto p-3 grid grid-cols-3 gap-3 content-start">
+            {SHOP_ITEMS[tab].map(i => {
+              const o = stats.inventory[tab].includes(i.id); const eq = tab==='themes'?stats.theme===i.id:stats.equipped[tab.slice(0,-1)]===i.id;
+              return (
+                <div key={i.id} onClick={()=>o?equip(i,tab):buy(i,tab)} className={`border-2 rounded-xl p-2 text-center cursor-pointer transition-transform active:scale-95 ${eq?'bg-[var(--accent)] border-transparent':o?'bg-[var(--bg)] border-[var(--border)]':'bg-[var(--panel)] border-[var(--border)] opacity-60'}`}>
+                  <div className="text-3xl mb-1">{tab==='themes'?<i className="bi bi-paint-bucket text-[var(--text)]"></i>:i.char}</div>
+                  <div className="text-[9px] font-bold h-6 overflow-hidden text-[var(--text)]">{i.name}</div>
+                  <div className="mt-1">{o?<span className="text-[10px] bg-[var(--text)] text-[var(--panel)] px-2 py-0.5 rounded-full">{eq?'そうび':'もってる'}</span>:<span className="text-[10px] font-bold bg-[var(--panel)] border border-[var(--border)] text-[var(--text)] px-2 py-0.5 rounded-full"><i className="bi bi-coin text-[var(--accent)]"></i> {i.price}</span>}</div>
+                </div>
+              );
+            })}
+          </div>
+          <MotionButton className="bg-[var(--text)] text-[var(--panel)] w-full py-4 mt-4 border-none shadow-md" onClick={()=>setView('home')}>もどる</MotionButton>
+        </div>
+      );
+    };
+
+    const ManagerView = ({ setView }) => {
+      const [groups, setGroups] = useState([]);
+      useEffect(() => { setGroups(StorageAPI.getProblemGroups()); }, []);
+      const del = (n) => { if(confirm('削除しますか？')){ StorageAPI.deleteProblemGroup(n); setGroups(StorageAPI.getProblemGroups()); showToast('success','削除しました');} };
+      const copy = (n) => {
+        const code = StorageAPI.encodeCourse(n, StorageAPI.getProblemsByGroup(n));
+        const textArea = document.createElement("textarea"); textArea.value = code; document.body.appendChild(textArea); textArea.select();
+        try { document.execCommand('copy'); showToast('success','共有コードをコピーしました'); } catch (err) { showToast('error', 'コピー失敗'); }
+        document.body.removeChild(textArea);
+      }
+      return (
+        <div className="flex flex-col h-[85vh] mt-4">
+          <h3 className="font-bold text-xl mb-4 text-center text-[var(--text)]"><i className="bi bi-gear text-[var(--secondary)]"></i> コース管理</h3>
+          <div className="card-pop flex-grow overflow-y-auto p-4 mb-4">
+            {groups.map(g => (
+              <div key={g.name} className="flex justify-between items-center border-b border-dashed border-[var(--border)] py-3 font-bold text-sm text-[var(--text)]">
+                <span>{g.name} <span className="text-xs opacity-50 ml-1">({g.count}問)</span></span>
+                <div className="flex gap-2">
+                  <button className="bg-[var(--bg)] text-[var(--text)] px-3 py-1.5 rounded-lg border border-[var(--border)] hover:bg-[var(--secondary)] hover:text-white transition-colors" onClick={()=>copy(g.name)}><i className="bi bi-share"></i></button>
+                  <button className="bg-red-50 text-[var(--primary)] px-3 py-1.5 rounded-lg border border-red-200 hover:bg-[var(--primary)] hover:text-white transition-colors" onClick={()=>del(g.name)}><i className="bi bi-trash"></i></button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-4 mb-3 border-none shadow-md" onClick={()=>setView('import')}><i className="bi bi-download"></i> コースを追加 (AI/共有)</MotionButton>
+          <button className="font-bold py-3 opacity-50 hover:opacity-100 transition-opacity" onClick={()=>setView('home')}>もどる</button>
+        </div>
+      );
+    };
+
+    const ImportView = ({ setView }) => {
+      const [text, setText] = useState(''); const [mode, setMode] = useState('code');
+      const copyPrompt = () => {
+        const prompt = `あなたは日本の小学校教育に精通したベテラン教師アシスタントです。\n指定の学年・単元の計算問題を作成します。\n# 出力ルール\n1. 形式: CSV形式（問題,答え）\n2. 正解が複数考えられる場合は「|」で区切る\n3. ヘッダーなし\n4. コードブロック内にCSVデータのみを出力`;
+        const textArea = document.createElement("textarea"); textArea.value = prompt; document.body.appendChild(textArea); textArea.select();
+        try { document.execCommand('copy'); showToast('success', 'プロンプトをコピーしました'); } catch (err) {} document.body.removeChild(textArea);
+      };
+      const proc = () => {
+        if(!text.trim()) return showToast('warning', '空です');
+        if (mode === 'code') {
+          const d = StorageAPI.decodeCourse(text.trim());
+          if (d) { StorageAPI.saveProblemSet(`受信_${d.name}`, d.problems); showToast('success', `${d.name} を追加しました`); setView('manager'); }
+          else showToast('error', '正しいコードではありません');
+        } else {
+          const p = []; text.split('\n').forEach(l=>{const a=l.split(/[,]/); if(a.length>=2 && a[0]!=='問題') p.push({q:a[0].trim(), a:a[1].trim().split('|')});});
+          if(p.length){ StorageAPI.saveProblemSet(`AI自作_${new Date().toLocaleDateString()}`, p); showToast('success', `${p.length}問保存しました`); setView('manager'); }
+          else showToast('error', '読み込めませんでした');
+        }
+      };
+      return (
+        <div className="flex flex-col h-[85vh] mt-4">
+          <h3 className="font-bold text-xl mb-4 text-center text-[var(--text)]"><i className="bi bi-download text-[var(--secondary)]"></i> コースを追加</h3>
+          <div className="flex gap-2 mb-4 bg-[var(--panel)] p-1 rounded-xl border-2 border-[var(--border)]">
+            <button onClick={() => setMode('code')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${mode === 'code' ? 'bg-[var(--text)] text-[var(--panel)]' : 'text-[var(--text)] opacity-60'}`}>共有コード</button>
+            <button onClick={() => setMode('ai')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition-colors ${mode === 'ai' ? 'bg-[var(--text)] text-[var(--panel)]' : 'text-[var(--text)] opacity-60'}`}>AI(CSV)</button>
+          </div>
+          <div className="card-pop flex-grow flex flex-col p-5 gap-4 mb-4">
+            <p className="text-xs font-bold opacity-70 text-[var(--text)]">{mode === 'code' ? 'もらった「共有コード」を貼り付けてください。' : 'AI(ChatGPT等)が作った「問題,答え」のリストを貼り付けてください。'}</p>
+            {mode === 'ai' && <button className="border-2 border-[var(--secondary)] text-[var(--secondary)] font-bold rounded-xl py-2 text-sm bg-[var(--bg)] hover:bg-[var(--secondary)] hover:text-white transition-colors" onClick={copyPrompt}>AIへの指示(プロンプト)をコピー</button>}
+            <textarea className="flex-grow border-2 border-[var(--border)] rounded-xl p-3 text-sm font-mono bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--secondary)]" value={text} onChange={e=>setText(e.target.value)} placeholder={mode==='code'?'eyJu...':'1+1,2\n2×3,6'}></textarea>
+            <MotionButton className="bg-[var(--primary)] text-white py-4 text-lg border-none shadow-md" onClick={proc}>追加する</MotionButton>
+          </div>
+          <button className="font-bold py-3 opacity-50 hover:opacity-100 transition-opacity" onClick={()=>setView('manager')}>もどる</button>
+        </div>
+      );
+    };
+
+    // ==========================================
+    // 5. アプリケーション本体
+    // ==========================================
+    const App = () => {
+      const [view, setView] = useState('loading');
+      const [configMode, setConfigMode] = useState('SCORE_ATTACK');
+      const [state, setState] = useState({ problemSet: [], timeLimitSec: 0, courseName: '', finalScore: 0, finalCombo: 0, earnedExp: 0, previousExp: 0, gameMode: 'SCORE_ATTACK', mistakes: [] });
+      const [stats, setStats] = useState(StorageAPI.getStats());
+      const [isMuted, setIsMuted] = useState(audioCtrl.muted);
+      const scriptsLoaded = useExternalScripts();
+      const [urlHostId, setUrlHostId] = useState(null);
+      const [peerState, setPeerState] = useState({ role: null, peer: null, conn: null, hostId: null, myName: '', connections: [], participants: {} });
+      const pRef = useRef(peerState); useEffect(() => { pRef.current = peerState; }, [peerState]);
+
+      useEffect(() => {
+        const h = new URLSearchParams(window.location.search).get('host');
+        if (h) { setUrlHostId(h); setView('clientJoin'); window.history.replaceState({}, '', window.location.pathname); }
+        else setTimeout(() => setView('home'), 800);
+      }, []);
+
+      useEffect(() => {
+        if (!isMuted) {
+          if (view === 'game') audioCtrl.playBGM('game');
+          else if (view === 'result') audioCtrl.stopBGM();
+          else if (view !== 'loading') audioCtrl.playBGM('home');
+        } else {
+          audioCtrl.stopBGM();
+        }
+      }, [view, isMuted]);
+
+      const initHost = () => {
+        if (!window.Peer) return showToast('error', '通信準備中');
+        const id = Math.floor(100000 + Math.random() * 900000).toString(); const p = new window.Peer(id);
+        p.on('open', (i) => { setPeerState(x => ({ ...x, role: 'host', peer: p, hostId: i, participants: {}, connections: [] })); setView('hostRoom'); });
+        p.on('connection', (c) => {
+          c.on('open', () => setPeerState(x => ({ ...x, connections: [...x.connections, c] })));
+          c.on('data', (d) => {
+            if (d.type === 'join') setPeerState(x => { const n = { ...x, participants: { ...x.participants, [c.peer]: { id: c.peer, name: d.name, score: 0, combo: 0 } } }; n.connections.forEach(cx => cx.send({ type: 'participants_update', data: n.participants })); return n; });
+            else if (d.type === 'score_update') setPeerState(x => { if (!x.participants[c.peer]) return x; const n = { ...x, participants: { ...x.participants, [c.peer]: { ...x.participants[c.peer], ...d.data } } }; n.connections.forEach(cx => cx.send({ type: 'participants_update', data: n.participants })); return n; });
+          });
+          c.on('close', () => setPeerState(x => ({ ...x, connections: x.connections.filter(cx => cx.peer !== c.peer) })));
+        });
+      };
+      const broadcast = useCallback((d) => pRef.current.connections.forEach(c => c.send(d)), []);
+
+      const initClient = (n, hId) => {
+        if (!window.Peer) return showToast('error', '通信準備中');
+        const p = new window.Peer();
+        p.on('open', () => {
+          const c = p.connect(hId);
+          c.on('open', () => { c.send({ type: 'join', name: n }); setPeerState(x => ({ ...x, role: 'client', peer: p, conn: c, myName: n })); setView('clientWait'); });
+          c.on('data', (d) => { if (d.type === 'game_start') { setState(pv => ({ ...pv, ...d.data })); setView('game'); } else if (d.type === 'game_finish') setView('result'); else if (d.type === 'participants_update') setPeerState(x => ({ ...x, participants: d.data })); });
+        });
+      };
+
+      const leave = () => { if (peerState.peer) peerState.peer.destroy(); setPeerState({ role: null, peer: null, conn: null, hostId: null, myName: '', connections: [], participants: {} }); setView('home'); };
+
+      const GlobalStyle = () => {
+        let v = `--bg: #FDFBF7; --primary: #DE7A66; --secondary: #7FA998; --accent: #F4C476; --text: #595B66; --panel: #FFFFFF; --border: #E8E4D9;`;
+        if (stats.theme === 'dark') v = `--bg: #2C303A; --primary: #E07A5F; --secondary: #81B29A; --accent: #F2CC8F; --text: #F4F1EA; --panel: #3D4251; --border: #4A4E69;`;
+        if (stats.theme === 'ocean') v = `--bg: #F4F9F9; --primary: #E07A5F; --secondary: #6B9AC4; --accent: #97AABD; --text: #4A5759; --panel: #FFFFFF; --border: #DDE5E8;`;
+        if (stats.theme === 'sakura') v = `--bg: #FFF7F8; --primary: #D988A3; --secondary: #9DB4C0; --accent: #F4D3D4; --text: #6A5B63; --panel: #FFFFFF; --border: #F0E4E6;`;
+        if (stats.theme === 'forest') v = `--bg: #F5F7F2; --primary: #E2856E; --secondary: #7A9E7E; --accent: #C3CBA3; --text: #4D574D; --panel: #FFFFFF; --border: #DDE2D8;`;
+        if (stats.theme === 'choco') v = `--bg: #F5F1ED; --primary: #B26A5E; --secondary: #849685; --accent: #C49A76; --text: #594D46; --panel: #FFFFFF; --border: #E2DAD1;`;
+        if (stats.theme === 'cyber') v = `--bg: #111111; --primary: #FF5A5F; --secondary: #08D9D6; --accent: #FFC000; --text: #EEEEEE; --panel: #222831; --border: #393E46;`;
+        return <style>{`:root { ${v} }`}</style>;
+      };
+
+      return (
+        <div className="flex flex-col h-[100dvh] w-full transition-colors duration-500">
+          <GlobalStyle />
+          {view !== 'game' && (
+            <header className="flex-shrink-0 bg-[var(--panel)] border-b-2 border-[var(--border)] py-3 px-5 flex justify-between items-center z-50 shadow-sm">
+              <div className="flex items-center cursor-pointer gap-2" onClick={() => { audioCtrl.playSE('click'); peerState.role ? leave() : setView('home'); }}>
+                <div className="text-[var(--primary)]"><i className="bi bi-journal-text text-2xl"></i></div>
+                <h1 className="text-2xl font-black tracking-widest text-[var(--text)]">Qalc<span className="text-[var(--primary)]">.</span></h1>
+              </div>
+              <button onClick={() => setIsMuted(audioCtrl.toggle())} className="text-2xl opacity-50 hover:opacity-100 transition-opacity"><i className={`bi ${isMuted ? 'bi-volume-mute' : 'bi-volume-up text-[var(--primary)]'}`}></i></button>
+            </header>
+          )}
+          <main className="flex-grow relative overflow-hidden">
+            <AnimatePresence mode="wait">
+              {view === 'loading' && <PageWrapper key="L"><div className="flex items-center justify-center h-[50vh]"><div className="animate-spin text-4xl text-[var(--secondary)]"><i className="bi bi-arrow-repeat"></i></div></div></PageWrapper>}
+              {view === 'home' && <PageWrapper key="H"><HomeView setView={setView} stats={stats} setStats={setStats} setConfigMode={setConfigMode} initHost={initHost} /></PageWrapper>}
+              {view === 'singleConfig' && <PageWrapper key="SC"><SingleConfigView setView={setView} setState={setState} configMode={configMode} /></PageWrapper>}
+              {view === 'hostRoom' && <PageWrapper key="HR"><HostRoomView peerState={peerState} setPeerState={setPeerState} broadcast={broadcast} setView={setView} setState={setState} configMode={configMode} setConfigMode={setConfigMode} /></PageWrapper>}
+              {view === 'clientJoin' && <PageWrapper key="CJ"><ClientJoinView initClient={initClient} urlHostId={urlHostId} setView={setView} /></PageWrapper>}
+              {view === 'clientWait' && <PageWrapper key="CW"><ClientWaitView peerState={peerState} leaveRoom={leave} /></PageWrapper>}
+              {view === 'game' && <PageWrapper key="G"><GameView state={state} setState={setState} setView={setView} stats={stats} setStats={setStats} peerState={peerState} setPeerState={setPeerState} /></PageWrapper>}
+              {view === 'result' && <PageWrapper key="R"><ResultView state={state} setView={setView} peerState={peerState} leaveRoom={leave} /></PageWrapper>}
+              {view === 'manager' && <PageWrapper key="M"><ManagerView setView={setView} /></PageWrapper>}
+              {view === 'import' && <PageWrapper key="I"><ImportView setView={setView} /></PageWrapper>}
+              {view === 'shop' && <PageWrapper key="S"><ShopView setView={setView} stats={stats} setStats={setStats} /></PageWrapper>}
+            </AnimatePresence>
+          </main>
+          <CustomToast />
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
