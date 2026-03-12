@@ -714,7 +714,7 @@
       }, [score, combo]);
       useEffect(() => { if (state.gameMode === 'SCORE_ATTACK' && rem <= 0) finish(); }, [rem]);
 
-      const finish = () => {
+      const finish = useCallback(() => {
         if (mistakesRef.current.length > 0) StorageAPI.addMistakes(mistakesRef.current);
         if (state.courseName === 'にがて克服') StorageAPI.removeMistakes(state.problemSet.filter(p => !mistakesRef.current.some(m => m.q === p.q)));
         let n = { ...stats }; const sec = Number(((Date.now() - startT) / 1000).toFixed(1));
@@ -726,7 +726,6 @@
         n = StorageAPI.updateDailyAndMissions(n, gameScore, maxCombo, 1, state.gameMode, correctCount);
         StorageAPI.saveStats(n); setStats(n);
 
-        // プレイ完了報酬としておんたまドリルのスコアに+5加算
         addGlobalScore(5);
 
         setState(p => ({ 
@@ -741,9 +740,9 @@
         
         if (isM) { if (peerState.role === 'client') peerState.conn.send({ type: 'game_finish', data: { finalScore: gameScore } }); else peerState.connections.forEach(c => c.send({ type: 'game_finish' })); }
         setView('result');
-      };
+      }, [stats, state.gameMode, state.courseName, state.problemSet, startT, setStats, setState, setView, peerState, addGlobalScore, score, maxCombo, correctCount]);
 
-      const submit = () => {
+      const submit = useCallback(() => {
         if (!ans) return; const q = state.problemSet[qIndex]; const normAns = normalizeStr(ans);
         if (q.a.some(a => normalizeStr(a) === normAns)) {
           const nc = combo + 1; audioCtrl.playSE('correct'); if (nc > 1) audioCtrl.playSE('combo', nc);
@@ -756,9 +755,19 @@
           audioCtrl.playSE('wrong'); setCombo(0); setAns(''); mistakesRef.current.push({ q: q.q, a: q.a.join('|') });
           if (state.gameMode === 'SUDDEN_DEATH') setTimeout(finish, 500);
         }
-      };
+      }, [ans, qIndex, combo, correctCount, state.problemSet, state.gameMode, finish]);
 
-      useEffect(() => { if (ans && state.problemSet[qIndex].a.some(a => normalizeStr(a) === normalizeStr(ans))) submit(); }, [ans]);
+      useEffect(() => {
+        const handleKey = (e) => {
+          if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+          const key = e.key;
+          if ((key >= '0' && key <= '9') || ['.', '/', '-', '(', ')'].includes(key)) { audioCtrl.playSE('click'); setAns(a => (a.length < 15 ? a + key : a)); }
+          else if (key === 'Backspace') { audioCtrl.playSE('click'); setAns(a => a.slice(0, -1)); }
+          else if (key === 'Enter') { e.preventDefault(); submit(); }
+          else if (key === 'Escape' || key === 'Delete' || key.toLowerCase() === 'c') { audioCtrl.playSE('click'); setAns(''); }
+        };
+        window.addEventListener('keydown', handleKey); return () => window.removeEventListener('keydown', handleKey);
+      });
 
       const q = state.problemSet[qIndex] || { q: '?', a: ['?'] };
       const dSec = state.gameMode === 'SCORE_ATTACK' ? rem : elap;
