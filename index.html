@@ -165,8 +165,6 @@
             this.vibrate([100, 50, 100]); break;
           case 'finish':
             osc.type = 'triangle'; osc.frequency.setValueAtTime(440, t); osc.frequency.setValueAtTime(880, t + 0.3); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.001, t + 1.0); osc.start(t); osc.stop(t + 1.0); break;
-          case 'coin':
-            osc.type = 'sine'; osc.frequency.setValueAtTime(1200, t); osc.frequency.setValueAtTime(1600, t + 0.1); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.01, t + 0.3); osc.start(t); osc.stop(t + 0.3); break;
         }
       }
       playBGM(type) {
@@ -728,7 +726,11 @@
         n = StorageAPI.updateDailyAndMissions(n, gameScore, maxCombo, 1, state.gameMode, correctCount);
         StorageAPI.saveStats(n); setStats(n);
 
-        addGlobalScore(5);
+        // 1問以上正解した場合のみ、プレイ完了報酬(+5)を付与する
+        const earnedGlobalScore = correctCount > 0 ? 5 : 0;
+        if (earnedGlobalScore > 0) {
+            addGlobalScore(earnedGlobalScore);
+        }
 
         setState(p => ({ 
           ...p, 
@@ -736,7 +738,7 @@
           finalCombo: maxCombo, 
           finalTime: sec, 
           finalCorrect: correctCount, 
-          earnedGlobalScore: 5, 
+          earnedGlobalScore: earnedGlobalScore, 
           mistakes: mistakesRef.current 
         }));
         
@@ -832,10 +834,16 @@
               <h4 className="font-bold opacity-70 mb-2 text-[var(--text)]">{state.gameMode==='TIME_ATTACK'?'CLEAR TIME':state.gameMode==='SUDDEN_DEATH'?'連続正解':'GAME SCORE'}</h4>
               <div className="text-7xl font-black text-[var(--text)] mb-6">{state.gameMode==='TIME_ATTACK'?`${finalTime}秒`:state.gameMode==='SUDDEN_DEATH'?`${finalCorrect}問`:finalGameScore}</div>
               
-              <div className="bg-[var(--bg)] border-2 border-[var(--border)] rounded-xl p-4 inline-block">
-                <p className="text-sm font-bold text-[var(--text)] opacity-80 mb-1">ドリルクリアボーナス！</p>
-                <div className="text-2xl font-black text-[var(--secondary)]">+{earnedGlobalScore} スコア</div>
-              </div>
+              {earnedGlobalScore > 0 ? (
+                <div className="bg-[var(--bg)] border-2 border-[var(--border)] rounded-xl p-4 inline-block">
+                  <p className="text-sm font-bold text-[var(--text)] opacity-80 mb-1">ドリルクリアボーナス！</p>
+                  <div className="text-2xl font-black text-[var(--secondary)]">+{earnedGlobalScore} スコア</div>
+                </div>
+              ) : (
+                <div className="text-sm font-bold text-[var(--primary)] opacity-80 mb-1">
+                  1問以上正解するとスコアがもらえるよ！
+                </div>
+              )}
             </div>
           )}
           {state.mistakes.length > 0 && (
