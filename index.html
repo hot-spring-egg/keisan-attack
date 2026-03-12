@@ -165,6 +165,8 @@
             this.vibrate([100, 50, 100]); break;
           case 'finish':
             osc.type = 'triangle'; osc.frequency.setValueAtTime(440, t); osc.frequency.setValueAtTime(880, t + 0.3); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.001, t + 1.0); osc.start(t); osc.stop(t + 1.0); break;
+          case 'coin':
+            osc.type = 'sine'; osc.frequency.setValueAtTime(1200, t); osc.frequency.setValueAtTime(1600, t + 0.1); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0.01, t + 0.3); osc.start(t); osc.stop(t + 0.3); break;
         }
       }
       playBGM(type) {
@@ -562,7 +564,7 @@
         let p = sel === 'mistakes' ? StorageAPI.getMistakes() : StorageAPI.getProblemsByGroup(sel);
         if (!p.length) return showToast('error', '問題がありません');
         p = [...p].sort(() => Math.random() - 0.5); if (configMode === 'TIME_ATTACK') p = p.slice(0, 20);
-        setState({ timeLimitSec: configMode === 'SCORE_ATTACK' ? time * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: String(x.a).split('|') })), courseName: sel, gameMode: configMode });
+        setState({ timeLimitSec: configMode === 'SCORE_ATTACK' ? time * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: Array.isArray(x.a) ? x.a : String(x.a).split('|') })), courseName: sel, gameMode: configMode });
         setView('game');
       };
       return (
@@ -630,7 +632,7 @@
       const start = () => {
         let p = StorageAPI.getProblemsByGroup(sel); if (!p.length) return showToast('error', '問題なし');
         p = [...p].sort(() => Math.random() - 0.5); if (configMode === 'TIME_ATTACK') p = p.slice(0, 20);
-        const conf = { timeLimitSec: configMode === 'SCORE_ATTACK' ? time * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: String(x.a).split('|') })), courseName: sel, gameMode: configMode };
+        const conf = { timeLimitSec: configMode === 'SCORE_ATTACK' ? time * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: Array.isArray(x.a) ? x.a : String(x.a).split('|') })), courseName: sel, gameMode: configMode };
         setPeerState(ps => { const n = { ...ps, participants: {} }; Object.keys(ps.participants).forEach(k => n.participants[k] = { ...ps.participants[k], score: 0 }); n.participants[ps.hostId] = { id: ps.hostId, name: 'リーダー', score: 0 }; n.connections.forEach(c => c.send({ type: 'participants_update', data: n.participants })); return n; });
         setState(conf); broadcast({ type: 'game_start', data: conf }); setView('game');
       };
@@ -752,7 +754,7 @@
           if (state.gameMode === 'TIME_ATTACK' && correctCount + 1 >= state.problemSet.length) setTimeout(finish, 500);
           else setQIndex(i => (i + 1) % state.problemSet.length);
         } else {
-          audioCtrl.playSE('wrong'); setCombo(0); setAns(''); mistakesRef.current.push({ q: q.q, a: q.a.join('|') });
+          audioCtrl.playSE('wrong'); setCombo(0); setAns(''); mistakesRef.current.push({ q: q.q, a: q.a });
           if (state.gameMode === 'SUDDEN_DEATH') setTimeout(finish, 500);
         }
       }, [ans, qIndex, combo, correctCount, state.problemSet, state.gameMode, finish]);
@@ -839,7 +841,7 @@
           {state.mistakes.length > 0 && (
             <div className="card-pop p-4 mb-6 max-h-48 overflow-y-auto">
               <h4 className="font-bold text-[var(--primary)] mb-3 flex items-center gap-2"><i className="bi bi-pen"></i> おさらい</h4>
-              {state.mistakes.map((m,i)=><div key={i} className="text-sm font-bold border-b border-dashed border-[var(--border)] py-2 text-[var(--text)]">{m.q} <i className="bi bi-arrow-right opacity-50 mx-2"></i> <span className="text-[var(--primary)] text-lg">{m.a.join(' または ')}</span></div>)}
+              {state.mistakes.map((m,i)=><div key={i} className="text-sm font-bold border-b border-dashed border-[var(--border)] py-2 text-[var(--text)]">{m.q} <i className="bi bi-arrow-right opacity-50 mx-2"></i> <span className="text-[var(--primary)] text-lg">{(Array.isArray(m.a) ? m.a : String(m.a).split('|')).join(' または ')}</span></div>)}
             </div>
           )}
           {isM ? (
