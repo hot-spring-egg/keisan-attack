@@ -783,7 +783,7 @@
               {top3.map((p, i) => <div key={p.id} className="text-[10px] font-bold bg-[var(--bg)] px-3 py-1 rounded-full border border-[var(--border)]">{i+1}位 {p.name}: <span className="text-[var(--primary)]">{p.score}</span></div>)}
             </div>
           )}
-          <div className={`flex flex-col md:flex-row h-full p-4 pb-8 md:pb-4 gap-4 ${memo ? 'md:w-full' : 'max-w-lg mx-auto w-full'}`}>
+          <div className={`flex flex-col md:flex-row h-full p-4 pb-12 sm:pb-16 md:pb-8 gap-4 ${memo ? 'md:w-full' : 'max-w-lg mx-auto w-full'}`}>
             <div className="flex flex-col flex-1 shrink-0">
               <div className="flex justify-between font-black text-2xl mb-2 opacity-80"><span className={state.gameMode==='SCORE_ATTACK'&&rem<=10?'text-red-500 animate-pulse':''}><i className="bi bi-clock"></i> {Math.floor(dSec/60)}:{(dSec%60).toString().padStart(2,'0')}</span><span className="text-[var(--primary)]">{state.gameMode==='TIME_ATTACK'?`${correctCount}/${state.problemSet.length}問`:state.gameMode==='SUDDEN_DEATH'?`${correctCount}問`:`${score}pt`}</span></div>
               <div className="flex-grow flex flex-col justify-center items-center relative min-h-[120px]">
@@ -794,7 +794,7 @@
                 <span className="text-4xl font-black text-[var(--secondary)] tracking-widest">{ans || <span className="opacity-20">?</span>}</span>
                 <button className={`absolute right-3 w-12 h-12 rounded-full flex items-center justify-center text-xl transition-colors ${memo?'bg-[var(--secondary)] text-white shadow-md':'bg-[var(--bg)] text-[var(--text)] opacity-50'}`} onClick={()=>{audioCtrl.playSE('click'); setMemo(!memo)}}><i className="bi bi-pen"></i></button>
               </div>
-              <div className="grid grid-cols-4 gap-2 h-48 shrink-0 mb-4 sm:mb-6">
+              <div className="grid grid-cols-4 gap-2 h-48 shrink-0 mb-4 sm:mb-8">
                 <div className="col-span-3 grid grid-cols-3 gap-2">
                   {['7','8','9','4','5','6','1','2','3','.','0','C'].map(n => (
                     <button key={n} className={`num-key ${n==='C'?'!bg-gray-300 !text-white !border-gray-300 !shadow-[0_4px_0_#9ca3af]':''}`} onPointerDown={(e)=>{e.preventDefault(); audioCtrl.playSE('click'); n==='C'?setAns(''):setAns(a=>a.length<15?a+n:a)}}>{n}</button>
