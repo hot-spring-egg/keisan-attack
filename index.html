@@ -365,6 +365,107 @@
     };
 
     // ==========================================
+    // 2.5 かだいリンク（先生が決めた設定を URL / QR で配る）
+    // ==========================================
+    // 設定を URL の「#kadai=…」に入れる。「#」から後ろはサーバーへ送られないので、開いても中身はどこにも届かない。
+    // 最初から入っているコースは名前だけを入れる（どの端末にも同じ名前のコースがある）。
+    // 先生が追加したコース（受信_… / AI自作_…）は、問題ごと入れる。
+    // リンクはだれでも作れて書きかえられるので、読むときは必ず形をたしかめる。
+    const KADAI_MODES = ['SCORE_ATTACK', 'TIME_ATTACK', 'SUDDEN_DEATH'];
+    const KADAI_MODE_LABEL = { SCORE_ATTACK: 'スコアアタック', TIME_ATTACK: 'タイムアタック', SUDDEN_DEATH: 'サドンデス' };
+    const KADAI_TITLE_MAX = 20;
+    const KADAI_NAME_MAX = 40;
+    const KADAI_PROBLEMS_MAX = 500;
+    const KADAI_TEXT_MAX = 100;
+    const KADAI_CODE_MAX = 200000;
+    const KADAI_QR_MAX = 1200; // これより長い URL は QR にすると細かすぎて読みとりにくい
+    const KADAI_STORE_KEY = 'keisan_kadai';
+
+    const PRESET_NAMES = new Set(Object.keys(generateDynamicProblems()));
+    const kadaiClean = (v, max) => (typeof v === 'string' ? v.replace(/\p{Cc}/gu, ' ').trim().slice(0, max) : '');
+    const kadaiMinutes = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.min(10, Math.max(1, Math.round(n))) : 3; };
+
+    const toBase64Url = (str) => {
+      const bytes = new TextEncoder().encode(str); let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    };
+    const fromBase64Url = (code) => {
+      const b64 = code.replace(/-/g, '+').replace(/_/g, '/'); const bin = atob(b64 + '==='.slice((b64.length + 3) % 4));
+      return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+    };
+
+    const encodeKadai = ({ title, mode, course, minutes, problems }) => {
+      const data = { v: 1, m: mode, c: course, n: kadaiMinutes(minutes) };
+      const t = kadaiClean(title, KADAI_TITLE_MAX); if (t) data.t = t;
+      if (!PRESET_NAMES.has(course)) data.p = problems.slice(0, KADAI_PROBLEMS_MAX).map(x => [String(x.q), (Array.isArray(x.a) ? x.a : String(x.a).split('|')).map(String)]);
+      return toBase64Url(JSON.stringify(data));
+    };
+
+    /** 読めなければ null。返すもの: { title, mode, course, minutes, problems（先生が追加したコースのときだけ） } */
+    const decodeKadai = (code) => {
+      try {
+        const s = String(code || '').trim();
+        if (!s || s.length > KADAI_CODE_MAX || !/^[A-Za-z0-9_-]+$/.test(s)) return null;
+        const d = JSON.parse(fromBase64Url(s));
+        if (!d || typeof d !== 'object' || d.v !== 1 || !KADAI_MODES.includes(d.m)) return null;
+        const course = kadaiClean(d.c, KADAI_NAME_MAX);
+        if (!course) return null;
+        let problems = null;
+        if (Array.isArray(d.p)) {
+          problems = d.p.slice(0, KADAI_PROBLEMS_MAX).map(x => {
+            if (!Array.isArray(x) || !Array.isArray(x[1])) return null;
+            const q = kadaiClean(x[0], KADAI_TEXT_MAX); const a = x[1].map(v => kadaiClean(v, KADAI_TEXT_MAX)).filter(Boolean).slice(0, 10);
+            return q && a.length ? { q, a } : null;
+          }).filter(Boolean);
+          if (!problems.length) return null;
+        } else if (!PRESET_NAMES.has(course)) return null; // 問題が入っていないのに、知らないコース
+        return { title: kadaiClean(d.t, KADAI_TITLE_MAX), mode: d.m, course, minutes: kadaiMinutes(d.n), problems };
+      } catch (e) { return null; }
+    };
+
+    const kadaiUrl = (code) => `${window.location.origin}${window.location.pathname}#kadai=${code}`;
+    const readKadaiHash = (hash) => { const m = String(hash || '').match(/^#kadai=([A-Za-z0-9_-]+)$/); return m ? m[1] : null; };
+    // 同じかだいかを見分ける短い印（FNV-1a）。同じリンクを開きなおしても、やった回数を消さないため
+    const kadaiId = (code) => { let h = 0x811c9dc5; for (let i = 0; i < code.length; i++) { h ^= code.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); };
+    const describeKadai = (k) => `${KADAI_MODE_LABEL[k.mode]}${k.mode === 'SCORE_ATTACK' ? `・${k.minutes}分` : ''}・${k.course}${k.problems ? `（${k.problems.length}問）` : ''}`;
+
+    const KadaiStore = {
+      get: () => {
+        const raw = StorageAPI.safeGet(KADAI_STORE_KEY, null);
+        if (!raw || typeof raw.code !== 'string') return null;
+        const k = decodeKadai(raw.code);
+        return k ? { ...k, code: raw.code, id: kadaiId(raw.code), doneCount: Number.isFinite(raw.doneCount) ? raw.doneCount : 0 } : null;
+      },
+      receive: (code) => {
+        const prev = StorageAPI.safeGet(KADAI_STORE_KEY, null);
+        const doneCount = prev && prev.code === code && Number.isFinite(prev.doneCount) ? prev.doneCount : 0;
+        StorageAPI.safeSet(KADAI_STORE_KEY, { code, doneCount });
+      },
+      markDone: (id) => {
+        const raw = StorageAPI.safeGet(KADAI_STORE_KEY, null);
+        if (!raw || typeof raw.code !== 'string' || kadaiId(raw.code) !== id) return;
+        StorageAPI.safeSet(KADAI_STORE_KEY, { ...raw, doneCount: (Number.isFinite(raw.doneCount) ? raw.doneCount : 0) + 1 });
+      },
+      clear: () => { try { window.localStorage.removeItem(KADAI_STORE_KEY); } catch (e) { /* ignore */ } },
+    };
+
+    /** ゲームを始めるときの state を作る（ふつうのプレイ・みんなであそぶ・かだいで共通） */
+    const buildPlayState = (mode, problems, minutes, courseName, extra = {}) => {
+      let p = [...problems].sort(() => Math.random() - 0.5); if (mode === 'TIME_ATTACK') p = p.slice(0, 20);
+      return { timeLimitSec: mode === 'SCORE_ATTACK' ? kadaiMinutes(minutes) * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: Array.isArray(x.a) ? x.a : String(x.a).split('|') })), courseName, gameMode: mode, kadaiId: null, ...extra };
+    };
+
+    const copyText = (text, okMsg) => {
+      const fallback = () => {
+        const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); showToast('success', okMsg); } catch (err) { showToast('error', 'コピーできませんでした'); }
+        document.body.removeChild(ta);
+      };
+      if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => showToast('success', okMsg), fallback); else fallback();
+    };
+
+    // ==========================================
     // 3. UIコンポーネント
     // ==========================================
     const toastEvent = new EventTarget();
@@ -477,7 +578,7 @@
     // ==========================================
     // 4. 各画面 View コンポーネント
     // ==========================================
-    const HomeView = ({ setView, stats, setStats, setConfigMode, initHost, addGlobalScore }) => {
+    const HomeView = ({ setView, stats, setStats, setConfigMode, initHost, addGlobalScore, kadai, onStartKadai, onCloseKadai }) => {
       const claim = (id) => {
         let n = { ...stats }; const m = n.missions.list.find(x => x.id === id);
         if (m && m.current >= m.target && !m.claimed) { 
@@ -496,6 +597,20 @@
             <h2 className="font-black text-4xl md:text-5xl tracking-widest text-[var(--text)]">ケイサンアタック<span className="text-[var(--primary)]">！</span></h2>
           </div>
           
+          {kadai && (
+            <div className="w-full card-pop p-4 flex flex-col gap-2 border-[var(--secondary)]" style={{ borderWidth: 3 }}>
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-black text-[var(--text)] flex items-center gap-2 min-w-0"><i className="bi bi-clipboard-check text-xl text-[var(--secondary)]"></i> <span className="truncate">かだい{kadai.title ? `：${kadai.title}` : ''}</span></h3>
+                <button type="button" onClick={onCloseKadai} className="shrink-0 min-h-[48px] min-w-[48px] text-[var(--text)] text-xs font-bold border-2 border-[var(--border)] rounded-lg px-2 bg-[var(--bg)]">しまう</button>
+              </div>
+              <div className="text-sm font-bold text-[var(--text)] break-words">{describeKadai(kadai)}</div>
+              {kadai.doneCount > 0 && <div className="text-xs font-black text-[var(--secondary)]"><i className="bi bi-check-lg"></i> {kadai.doneCount}かい やったよ</div>}
+              <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-3 text-lg border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={onStartKadai}>
+                <i className="bi bi-play-fill"></i> かだいを はじめる
+              </MotionButton>
+            </div>
+          )}
+
           <div className="grid grid-cols-3 gap-2 w-full mt-2">
             <MotionButton className="bg-[var(--panel)] text-[var(--text)] p-3 flex-col h-auto" onClick={() => { setConfigMode('SCORE_ATTACK'); setView('singleConfig'); }}>
               <i className="bi bi-award text-2xl text-[var(--accent)] mb-1"></i> <span className="text-[10px]">スコア</span>
@@ -538,6 +653,52 @@
       );
     };
 
+    // かだいリンクのダイアログ（先生むけ）。リンクと QR を出す
+    const KadaiLinkDialog = ({ mode, course, minutes, onClose }) => {
+      const [title, setTitle] = useState('');
+      const qrRef = useRef(null);
+      const [qr, setQr] = useState('loading'); // loading | ok | long | error
+      const problems = PRESET_NAMES.has(course) ? null : StorageAPI.getProblemsByGroup(course);
+      const url = kadaiUrl(encodeKadai({ title, mode, course, minutes, problems: problems || [] }));
+      const summary = describeKadai({ mode, course, minutes, problems });
+
+      useEffect(() => {
+        const box = qrRef.current; if (!box) return;
+        box.innerHTML = '';
+        if (url.length > KADAI_QR_MAX) { setQr('long'); return; }
+        if (!window.QRCode) { setQr('error'); return; }
+        try {
+          new window.QRCode(box, { text: url, width: 200, height: 200, colorDark: '#000000', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel ? window.QRCode.CorrectLevel.L : undefined });
+          setQr('ok');
+        } catch (e) { box.innerHTML = ''; setQr('error'); }
+      }, [url]);
+
+      useEffect(() => { const h = (e) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [onClose]);
+
+      return (
+        <div className="fixed inset-0 z-[9000] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+          <div role="dialog" aria-modal="true" aria-label="かだいリンク" className="card-pop w-full max-w-md max-h-[90vh] overflow-y-auto p-5 flex flex-col gap-3 text-[var(--text)]" onClick={e => e.stopPropagation()}>
+            <h2 className="font-black text-xl flex items-center gap-2"><i className="bi bi-link-45deg text-2xl text-[var(--secondary)]"></i> かだいリンク</h2>
+            <p className="text-sm font-bold leading-relaxed">このリンクか QR を こどもに わたすと、ひらいたときに ホームに「かだい」が 出て、ボタン ひとつで この せっていの ゲームが はじまります。</p>
+            <div className="text-sm font-black bg-[var(--bg)] border-2 border-[var(--border)] rounded-xl px-3 py-2 break-words">{summary}</div>
+            <label className="text-sm font-bold flex flex-col gap-1">
+              かだいの なまえ（なくても よい・{KADAI_TITLE_MAX}もじまで）
+              <input type="text" value={title} maxLength={KADAI_TITLE_MAX} onChange={e => setTitle(e.target.value)} placeholder="れい: きょうの しゅくだい" className="min-h-[48px] border-2 border-[var(--border)] rounded-xl px-3 font-bold bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--secondary)]" />
+            </label>
+            <p className="text-xs font-bold opacity-70">こどもの なまえは 入れないで ください。</p>
+            <div className="flex flex-col items-center justify-center min-h-[100px]">
+              {qr === 'long' && <p className="text-sm font-bold text-center">もんだいが おおいので QR には できません。リンクを コピーして わたしてください。</p>}
+              {qr === 'error' && <p className="text-sm font-bold text-center">QR を 出せませんでした。リンクを コピーして わたしてください。</p>}
+              <div ref={qrRef} role="img" aria-label="かだいリンクの QR コード" className={qr === 'ok' ? 'bg-white p-3 rounded-xl border-2 border-[var(--border)]' : 'hidden'}></div>
+            </div>
+            <input type="text" readOnly value={url} aria-label="かだいリンクの URL" onFocus={e => e.target.select()} className="min-h-[48px] w-full border-2 border-[var(--border)] rounded-xl px-3 text-xs font-mono bg-[var(--bg)] text-[var(--text)]" />
+            <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-3 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={() => copyText(url, 'かだいリンクを コピーしました')}><i className="bi bi-clipboard"></i> リンクを コピー</MotionButton>
+            <MotionButton autoFocus className="bg-[var(--bg)] text-[var(--text)] w-full py-3" onClick={onClose}>とじる</MotionButton>
+          </div>
+        </div>
+      );
+    };
+
     const SingleConfigView = ({ setView, setState, configMode }) => {
       const [groups, setGroups] = useState([]); const [sel, setSel] = useState(''); const [time, setTime] = useState(3);
       const [selectedGrade, setSelectedGrade] = useState('すべて');
@@ -564,11 +725,16 @@
 
       const start = () => {
         if (!sel) return showToast('warning', 'コースを選択してね');
-        let p = sel === 'mistakes' ? StorageAPI.getMistakes() : StorageAPI.getProblemsByGroup(sel);
+        const p = sel === 'mistakes' ? StorageAPI.getMistakes() : StorageAPI.getProblemsByGroup(sel);
         if (!p.length) return showToast('error', '問題がありません');
-        p = [...p].sort(() => Math.random() - 0.5); if (configMode === 'TIME_ATTACK') p = p.slice(0, 20);
-        setState({ timeLimitSec: configMode === 'SCORE_ATTACK' ? time * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: Array.isArray(x.a) ? x.a : String(x.a).split('|') })), courseName: sel, gameMode: configMode });
+        setState(buildPlayState(configMode, p, time, sel));
         setView('game');
+      };
+      const [kadaiOpen, setKadaiOpen] = useState(false);
+      const openKadai = () => {
+        if (!sel) return showToast('warning', 'コースを選択してね');
+        if (sel === 'mistakes') return showToast('error', 'にがて克服は その子の まちがいなので かだいには できません');
+        setKadaiOpen(true);
       };
       return (
         <div className="card-pop p-6 flex flex-col gap-5 mt-8">
@@ -603,7 +769,9 @@
             </div>
           )}
           <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-xl mt-4 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={start}>スタート！</MotionButton>
+          <button type="button" className="w-full min-h-[48px] flex items-center justify-center gap-2 font-bold text-sm text-[var(--text)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--bg)]" onClick={() => { audioCtrl.playSE('click'); openKadai(); }}><i className="bi bi-link-45deg text-lg"></i> 先生むけ：この せっていで かだいリンクを つくる</button>
           <button className="opacity-50 font-bold py-2 hover:opacity-100 transition-opacity" onClick={() => { audioCtrl.playSE('click'); setView('home') }}>もどる</button>
+          {kadaiOpen && <KadaiLinkDialog mode={configMode} course={sel} minutes={time} onClose={() => setKadaiOpen(false)} />}
         </div>
       );
     };
@@ -633,9 +801,8 @@
 
       useEffect(() => { if (peerState.hostId && window.QRCode) { document.getElementById('qr').innerHTML=''; new window.QRCode(document.getElementById('qr'), { text: `${window.location.origin}${window.location.pathname}?host=${peerState.hostId}`, width: 120, height: 120, colorDark: "#4A4E69", colorLight: "#ffffff" }); } }, [peerState.hostId]);
       const start = () => {
-        let p = StorageAPI.getProblemsByGroup(sel); if (!p.length) return showToast('error', '問題なし');
-        p = [...p].sort(() => Math.random() - 0.5); if (configMode === 'TIME_ATTACK') p = p.slice(0, 20);
-        const conf = { timeLimitSec: configMode === 'SCORE_ATTACK' ? time * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: Array.isArray(x.a) ? x.a : String(x.a).split('|') })), courseName: sel, gameMode: configMode };
+        const p = StorageAPI.getProblemsByGroup(sel); if (!p.length) return showToast('error', '問題なし');
+        const conf = buildPlayState(configMode, p, time, sel);
         setPeerState(ps => { const n = { ...ps, participants: {} }; Object.keys(ps.participants).forEach(k => n.participants[k] = { ...ps.participants[k], score: 0 }); n.participants[ps.hostId] = { id: ps.hostId, name: 'リーダー', score: 0 }; n.connections.forEach(c => c.send({ type: 'participants_update', data: n.participants })); return n; });
         setState(conf); broadcast({ type: 'game_start', data: conf }); setView('game');
       };
@@ -735,6 +902,7 @@
         
         n = StorageAPI.updateDailyAndMissions(n, gameScore, maxCombo, 1, state.gameMode, correctCount);
         StorageAPI.saveStats(n); setStats(n);
+        if (state.kadaiId && !isM) KadaiStore.markDone(state.kadaiId);
 
         // 1問以上正解した場合のみ、プレイ完了報酬(+5)を付与する
         const earnedGlobalScore = correctCount > 0 ? 5 : 0;
@@ -754,7 +922,7 @@
         
         if (isM) { if (peerState.role === 'client') peerState.conn.send({ type: 'game_finish', data: { finalScore: gameScore } }); else peerState.connections.forEach(c => c.send({ type: 'game_finish' })); }
         setView('result');
-      }, [stats, state.gameMode, state.courseName, state.problemSet, startT, setStats, setState, setView, peerState, addGlobalScore, score, maxCombo, correctCount]);
+      }, [stats, state.gameMode, state.courseName, state.problemSet, state.kadaiId, startT, setStats, setState, setView, peerState, addGlobalScore, score, maxCombo, correctCount]);
 
       const submit = useCallback(() => {
         if (!ans) return; const q = state.problemSet[qIndex]; const normAns = normalizeStr(ans);
@@ -824,7 +992,7 @@
       );
     };
 
-    const ResultView = ({ state, setView, peerState, leaveRoom }) => {
+    const ResultView = ({ state, setView, peerState, leaveRoom, onStartKadai }) => {
       const { earnedGlobalScore, finalGameScore, finalTime, finalCorrect } = state;
 
       useEffect(() => { triggerConfetti({ particleCount: 150, spread: 80, origin: { y: 0.6 }, colors: ['#E07A5F', '#81B29A', '#F2CC8F'] }); }, []);
@@ -867,7 +1035,12 @@
               {peerState.role === 'host' && <MotionButton className="bg-[var(--secondary)] text-white w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={()=>setView('hostRoom')}>もう一回あそぶ</MotionButton>}
               <button className="font-bold opacity-50 py-3 hover:opacity-100 transition-opacity" onClick={leaveRoom}>退出してホームへ</button>
             </div>
-          ) : <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)] mt-auto" onClick={()=>setView('home')}>ホームへもどる</MotionButton>}
+          ) : (
+            <div className="flex flex-col gap-3 mt-auto">
+              {state.kadaiId && <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={onStartKadai}><i className="bi bi-arrow-repeat"></i> かだいを もういちど</MotionButton>}
+              <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-xl border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={()=>setView('home')}>ホームへもどる</MotionButton>
+            </div>
+          )}
         </div>
       );
     };
@@ -961,12 +1134,43 @@
       }, []);
 
       const scriptsLoaded = useExternalScripts();
+
+      // かだい（先生から受けとった設定）
+      const [kadai, setKadai] = useState(() => KadaiStore.get());
+      const receiveKadaiFromHash = useCallback(() => {
+        const code = readKadaiHash(window.location.hash);
+        if (!code) return false;
+        window.history.replaceState({}, '', window.location.pathname + window.location.search); // 読んだらアドレスから消す
+        if (!decodeKadai(code)) { showToast('error', 'かだいリンクを 読めませんでした'); return false; }
+        KadaiStore.receive(code);
+        setKadai(KadaiStore.get());
+        showToast('success', 'かだいを うけとりました');
+        return true;
+      }, []);
+      useEffect(() => {
+        const h = () => { if (receiveKadaiFromHash() && !pRef.current.role) setView(v => (v === 'game' ? v : 'home')); };
+        window.addEventListener('hashchange', h); return () => window.removeEventListener('hashchange', h);
+      }, [receiveKadaiFromHash]);
+      useEffect(() => { if (view === 'home') setKadai(KadaiStore.get()); }, [view]);
+      const startKadai = () => {
+        const k = KadaiStore.get();
+        if (!k) { setKadai(null); return showToast('error', 'かだいが 見つかりません'); }
+        const p = k.problems || StorageAPI.getProblemsByGroup(k.course);
+        if (!p.length) return showToast('error', '問題がありません');
+        setState(buildPlayState(k.mode, p, k.minutes, k.course, { kadaiId: k.id }));
+        setView('game');
+      };
+      const closeKadai = () => {
+        if (!confirm('かだいを しまいますか？（もういちど リンクを ひらけば もどります）')) return;
+        KadaiStore.clear(); setKadai(null);
+      };
       const [urlHostId, setUrlHostId] = useState(null);
       const [peerState, setPeerState] = useState({ role: null, peer: null, conn: null, hostId: null, myName: '', connections: [], participants: {} });
       const pRef = useRef(peerState); useEffect(() => { pRef.current = peerState; }, [peerState]);
 
       useEffect(() => {
         const h = new URLSearchParams(window.location.search).get('host');
+        receiveKadaiFromHash();
         if (h) { setUrlHostId(h); setView('clientJoin'); window.history.replaceState({}, '', window.location.pathname); }
         else setTimeout(() => setView('home'), 1500);
       }, []);
@@ -1033,13 +1237,13 @@
           <main className="flex-grow relative overflow-hidden">
             <AnimatePresence mode="wait">
               {view === 'loading' && <PageWrapper key="L"><Loading /></PageWrapper>}
-              {view === 'home' && <PageWrapper key="H"><HomeView setView={setView} stats={stats} setStats={setStats} setConfigMode={setConfigMode} initHost={initHost} globalScore={globalScore} addGlobalScore={addGlobalScore} /></PageWrapper>}
+              {view === 'home' && <PageWrapper key="H"><HomeView setView={setView} stats={stats} setStats={setStats} setConfigMode={setConfigMode} initHost={initHost} globalScore={globalScore} addGlobalScore={addGlobalScore} kadai={kadai} onStartKadai={startKadai} onCloseKadai={closeKadai} /></PageWrapper>}
               {view === 'singleConfig' && <PageWrapper key="SC"><SingleConfigView setView={setView} setState={setState} configMode={configMode} /></PageWrapper>}
               {view === 'hostRoom' && <PageWrapper key="HR"><HostRoomView peerState={peerState} setPeerState={setPeerState} broadcast={broadcast} setView={setView} setState={setState} configMode={configMode} setConfigMode={setConfigMode} /></PageWrapper>}
               {view === 'clientJoin' && <PageWrapper key="CJ"><ClientJoinView initClient={initClient} urlHostId={urlHostId} setView={setView} /></PageWrapper>}
               {view === 'clientWait' && <PageWrapper key="CW"><ClientWaitView peerState={peerState} leaveRoom={leave} /></PageWrapper>}
               {view === 'game' && <PageWrapper key="G"><GameView state={state} setState={setState} setView={setView} stats={stats} setStats={setStats} peerState={peerState} setPeerState={setPeerState} addGlobalScore={addGlobalScore} /></PageWrapper>}
-              {view === 'result' && <PageWrapper key="R"><ResultView state={state} setView={setView} peerState={peerState} leaveRoom={leave} /></PageWrapper>}
+              {view === 'result' && <PageWrapper key="R"><ResultView state={state} setView={setView} peerState={peerState} leaveRoom={leave} onStartKadai={startKadai} /></PageWrapper>}
               {view === 'manager' && <PageWrapper key="M"><ManagerView setView={setView} /></PageWrapper>}
               {view === 'import' && <PageWrapper key="I"><ImportView setView={setView} /></PageWrapper>}
             </AnimatePresence>
