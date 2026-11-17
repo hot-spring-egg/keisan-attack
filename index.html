@@ -677,7 +677,10 @@
 
       return (
         <div className="fixed inset-0 z-[9000] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
-          <div role="dialog" aria-modal="true" aria-label="かだいリンク" className="card-pop w-full max-w-md max-h-[90vh] overflow-y-auto p-5 flex flex-col gap-3 text-[var(--text)]" onClick={e => e.stopPropagation()}>
+          {/* 高さが足りない画面（横向きのタブレットなど）では、中身を縮めずにスクロールさせる。
+              スクロールする枠そのものを flex にすると、QR の場所が縮んで QR が下の URL 欄に重なる */}
+          <div role="dialog" aria-modal="true" aria-label="かだいリンク" className="card-pop w-full max-w-md max-h-[90dvh] overflow-y-auto text-[var(--text)]" onClick={e => e.stopPropagation()}>
+           <div className="p-5 flex flex-col gap-3">
             <h2 className="font-black text-xl flex items-center gap-2"><i className="bi bi-link-45deg text-2xl text-[var(--secondary)]"></i> かだいリンク</h2>
             <p className="text-sm font-bold leading-relaxed">このリンクか QR を こどもに わたすと、ひらいたときに ホームに「かだい」が 出て、ボタン ひとつで この せっていの ゲームが はじまります。</p>
             <div className="text-sm font-black bg-[var(--bg)] border-2 border-[var(--border)] rounded-xl px-3 py-2 break-words">{summary}</div>
@@ -686,7 +689,7 @@
               <input type="text" value={title} maxLength={KADAI_TITLE_MAX} onChange={e => setTitle(e.target.value)} placeholder="れい: きょうの しゅくだい" className="min-h-[48px] border-2 border-[var(--border)] rounded-xl px-3 font-bold bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--secondary)]" />
             </label>
             <p className="text-xs font-bold opacity-70">こどもの なまえは 入れないで ください。</p>
-            <div className="flex flex-col items-center justify-center min-h-[100px]">
+            <div className="flex flex-col items-center justify-center min-h-[100px] shrink-0">
               {qr === 'long' && <p className="text-sm font-bold text-center">もんだいが おおいので QR には できません。リンクを コピーして わたしてください。</p>}
               {qr === 'error' && <p className="text-sm font-bold text-center">QR を 出せませんでした。リンクを コピーして わたしてください。</p>}
               <div ref={qrRef} role="img" aria-label="かだいリンクの QR コード" className={qr === 'ok' ? 'bg-white p-3 rounded-xl border-2 border-[var(--border)]' : 'hidden'}></div>
@@ -694,6 +697,7 @@
             <input type="text" readOnly value={url} aria-label="かだいリンクの URL" onFocus={e => e.target.select()} className="min-h-[48px] w-full border-2 border-[var(--border)] rounded-xl px-3 text-xs font-mono bg-[var(--bg)] text-[var(--text)]" />
             <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-3 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={() => copyText(url, 'かだいリンクを コピーしました')}><i className="bi bi-clipboard"></i> リンクを コピー</MotionButton>
             <MotionButton autoFocus className="bg-[var(--bg)] text-[var(--text)] w-full py-3" onClick={onClose}>とじる</MotionButton>
+           </div>
           </div>
         </div>
       );
