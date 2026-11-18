@@ -411,7 +411,8 @@
     const KADAI_MODE_LABEL = { SCORE_ATTACK: 'スコアアタック', TIME_ATTACK: 'タイムアタック', SUDDEN_DEATH: 'サドンデス' };
     const KADAI_TITLE_MAX = 20;
     const KADAI_NAME_MAX = 40;
-    const KADAI_PROBLEMS_MAX = 500;
+    const KADAI_PROBLEMS_MAX = 500;  // リンクに入れる、先生が追加したコースの問題の合計
+    const KADAI_COURSES_MAX = 200;
     const KADAI_TEXT_MAX = 100;
     const KADAI_CODE_MAX = 200000;
     const KADAI_QR_MAX = 1200; // これより長い URL は QR にすると細かすぎて読みとりにくい
@@ -435,33 +436,52 @@
       return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
     };
 
-    const encodeKadai = ({ title, mode, course, minutes, count, problems }) => {
-      const data = { v: 1, m: mode, c: course, n: kadaiMinutes(minutes) };
+    const cleanRows = (rows, room) => (Array.isArray(rows) ? rows : []).slice(0, Math.max(0, room)).map(x => {
+      if (!Array.isArray(x) || !Array.isArray(x[1])) return null;
+      const q = kadaiClean(x[0], KADAI_TEXT_MAX); const a = x[1].map(v => kadaiClean(v, KADAI_TEXT_MAX)).filter(Boolean).slice(0, 10);
+      return q && a.length ? { q, a } : null;
+    }).filter(Boolean);
+    const toRows = (problems) => problems.map(x => [String(x.q), (Array.isArray(x.a) ? x.a : String(x.a).split('|')).map(String)]);
+
+    /** courses はコースの名前の列（にがて克服 'mistakes' は入れない）。先生が追加したコースは問題ごと入れる */
+    const encodeKadai = ({ title, mode, courses, minutes, count }) => {
+      const names = [...new Set(courses)].filter(n => n !== 'mistakes').slice(0, KADAI_COURSES_MAX);
+      const data = { v: 2, m: mode, c: names, n: kadaiMinutes(minutes) };
       if (mode === 'TIME_ATTACK') data.k = taCount(count);
       const t = kadaiClean(title, KADAI_TITLE_MAX); if (t) data.t = t;
-      if (!PRESET_NAMES.has(course)) data.p = problems.slice(0, KADAI_PROBLEMS_MAX).map(x => [String(x.q), (Array.isArray(x.a) ? x.a : String(x.a).split('|')).map(String)]);
+      let room = KADAI_PROBLEMS_MAX; const p = {};
+      for (const n of names) {
+        if (PRESET_NAMES.has(n) || room <= 0) continue;
+        const rows = toRows(StorageAPI.getProblemsByGroup(n).slice(0, room));
+        if (rows.length) { p[n] = rows; room -= rows.length; }
+      }
+      if (Object.keys(p).length) data.p = p;
       return toBase64Url(JSON.stringify(data));
     };
 
-    /** 読めなければ null。返すもの: { title, mode, course, minutes, problems（先生が追加したコースのときだけ） } */
+    /** 読めなければ null。返すもの: { title, mode, courses, minutes, count, custom: { 名前: 問題の列（先生が追加したコースだけ） } }
+     *  v1（コース1つのときに作ったリンク）も読む */
     const decodeKadai = (code) => {
       try {
         const s = String(code || '').trim();
         if (!s || s.length > KADAI_CODE_MAX || !/^[A-Za-z0-9_-]+$/.test(s)) return null;
         const d = JSON.parse(fromBase64Url(s));
-        if (!d || typeof d !== 'object' || d.v !== 1 || !KADAI_MODES.includes(d.m)) return null;
-        const course = kadaiClean(d.c, KADAI_NAME_MAX);
-        if (!course) return null;
-        let problems = null;
-        if (Array.isArray(d.p)) {
-          problems = d.p.slice(0, KADAI_PROBLEMS_MAX).map(x => {
-            if (!Array.isArray(x) || !Array.isArray(x[1])) return null;
-            const q = kadaiClean(x[0], KADAI_TEXT_MAX); const a = x[1].map(v => kadaiClean(v, KADAI_TEXT_MAX)).filter(Boolean).slice(0, 10);
-            return q && a.length ? { q, a } : null;
-          }).filter(Boolean);
-          if (!problems.length) return null;
-        } else if (!PRESET_NAMES.has(course)) return null; // 問題が入っていないのに、知らないコース
-        return { title: kadaiClean(d.t, KADAI_TITLE_MAX), mode: d.m, course, minutes: kadaiMinutes(d.n), count: taCount(d.k), problems };
+        if (!d || typeof d !== 'object' || ![1, 2].includes(d.v) || !KADAI_MODES.includes(d.m)) return null;
+        let rawNames, rawCustom;
+        if (d.v === 1) { const n = kadaiClean(d.c, KADAI_NAME_MAX); rawNames = [n]; rawCustom = Array.isArray(d.p) ? { [n]: d.p } : {}; }
+        else { rawNames = Array.isArray(d.c) ? d.c : []; rawCustom = d.p && typeof d.p === 'object' && !Array.isArray(d.p) ? d.p : {}; }
+        const courses = []; const custom = {}; let room = KADAI_PROBLEMS_MAX;
+        for (const raw of rawNames.slice(0, KADAI_COURSES_MAX)) {
+          const n = kadaiClean(raw, KADAI_NAME_MAX);
+          if (!n || n === 'mistakes' || courses.includes(n)) continue;
+          if (Object.prototype.hasOwnProperty.call(rawCustom, raw)) {
+            const rows = cleanRows(rawCustom[raw], room);
+            if (!rows.length) continue;
+            custom[n] = rows; room -= rows.length; courses.push(n);
+          } else if (PRESET_NAMES.has(n)) courses.push(n); // 問題が入っていないのに知らないコースは、どの端末でも出せないので使わない
+        }
+        if (!courses.length) return null;
+        return { title: kadaiClean(d.t, KADAI_TITLE_MAX), mode: d.m, courses, minutes: kadaiMinutes(d.n), count: taCount(d.k), custom };
       } catch (e) { return null; }
     };
 
@@ -469,7 +489,14 @@
     const readKadaiHash = (hash) => { const m = String(hash || '').match(/^#kadai=([A-Za-z0-9_-]+)$/); return m ? m[1] : null; };
     // 同じかだいかを見分ける短い印（FNV-1a）。同じリンクを開きなおしても、やった回数を消さないため
     const kadaiId = (code) => { let h = 0x811c9dc5; for (let i = 0; i < code.length; i++) { h ^= code.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); };
-    const describeKadai = (k) => `${KADAI_MODE_LABEL[k.mode]}${k.mode === 'SCORE_ATTACK' ? `・${k.minutes}分` : ''}${k.mode === 'TIME_ATTACK' ? `・${taCount(k.count)}問` : ''}・${k.course}${k.problems ? `（${k.problems.length}問）` : ''}`;
+    const courseLabel = (n) => (n === 'mistakes' ? 'にがて克服' : n);
+    const joinCourseNames = (names) => names.map(courseLabel).join('、');
+    // 例: 「タイムアタック・20問・2年_九九 ほか2」
+    const describeKadai = (k) => {
+      const names = k.courses.map(courseLabel);
+      const head = names.length > 1 ? `${names[0]} ほか${names.length - 1}` : names[0];
+      return `${KADAI_MODE_LABEL[k.mode]}${k.mode === 'SCORE_ATTACK' ? `・${k.minutes}分` : ''}${k.mode === 'TIME_ATTACK' ? `・${taCount(k.count)}問` : ''}・${head}`;
+    };
 
     const KadaiStore = {
       get: () => {
@@ -492,9 +519,12 @@
     };
 
     /** ゲームを始めるときの state を作る（ふつうのプレイ・みんなであそぶ・かだいで共通） */
-    const buildPlayState = (mode, problems, { minutes, count }, courseName, extra = {}) => {
+    // えらんだコース（いくつでも）の問題をまとめて集める。'mistakes' はにがて克服
+    const collectProblems = (names) => names.flatMap(n => (n === 'mistakes' ? StorageAPI.getMistakes() : StorageAPI.getProblemsByGroup(n)) || []);
+
+    const buildPlayState = (mode, problems, { minutes, count }, courseNames, extra = {}) => {
       let p = [...problems].sort(() => Math.random() - 0.5); if (mode === 'TIME_ATTACK') p = p.slice(0, taCount(count));
-      return { timeLimitSec: mode === 'SCORE_ATTACK' ? kadaiMinutes(minutes) * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: Array.isArray(x.a) ? x.a : String(x.a).split('|') })), courseName, gameMode: mode, kadaiId: null, ...extra };
+      return { timeLimitSec: mode === 'SCORE_ATTACK' ? kadaiMinutes(minutes) * 60 : 0, problemSet: p.map(x => ({ q: x.q, a: Array.isArray(x.a) ? x.a : String(x.a).split('|') })), courseName: joinCourseNames(courseNames), courseNames: [...courseNames], gameMode: mode, kadaiId: null, ...extra };
     };
 
     const copyText = (text, okMsg) => {
@@ -694,6 +724,59 @@
       );
     };
 
+    // コースの複数選択（カルクと同じ形）。タップで ON/OFF。
+    // 学年で隠れているぶんも含めて、えらんだコースは下のチップでいつでも見えて、はずせる
+    const CourseMultiSelect = ({ filteredGroups, allGroups, selected, setSelected }) => {
+      const toggle = (name) => { audioCtrl.playSE('click'); setSelected(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]); };
+      const visibleNames = filteredGroups.map(g => g.name);
+      const allVisibleSelected = visibleNames.length > 0 && visibleNames.every(n => selected.includes(n));
+      const toggleAllVisible = () => { audioCtrl.playSE('click'); setSelected(prev => allVisibleSelected ? prev.filter(n => !visibleNames.includes(n)) : [...new Set([...prev, ...visibleNames])]); };
+      const groupOf = (name) => allGroups.find(g => g.name === name);
+      const totalCount = selected.reduce((sum, name) => sum + (groupOf(name)?.count || 0), 0);
+      return (
+        <div className="w-full">
+          <div className="flex items-end justify-between mb-1 gap-2">
+            <label className="text-xs font-bold opacity-70">コースをえらぶ（いくつでも OK）</label>
+            {visibleNames.length > 0 && (
+              <button type="button" onClick={toggleAllVisible} className="shrink-0 min-h-[48px] text-xs font-bold px-3 rounded-full border-2 border-[var(--border)] bg-[var(--bg)] text-[var(--text)]">
+                {allVisibleSelected ? 'ぜんぶ はずす' : 'ぜんぶ えらぶ'}
+              </button>
+            )}
+          </div>
+          <div className="border-2 border-[var(--border)] rounded-xl bg-[var(--bg)] overflow-hidden">
+            <div className="max-h-56 overflow-y-auto p-2 flex flex-col gap-1.5">
+              {filteredGroups.length === 0 && <p className="text-center font-bold text-sm opacity-70 py-4">コースが ありません</p>}
+              {filteredGroups.map(g => {
+                const on = selected.includes(g.name);
+                return (
+                  <button key={g.name} type="button" onClick={() => toggle(g.name)} aria-pressed={on}
+                    className={`min-h-[48px] flex items-center gap-2.5 px-2.5 rounded-lg border-2 text-left transition-colors ${on ? 'bg-[var(--accent)] border-[var(--text)]' : 'bg-[var(--panel)] border-transparent'}`}>
+                    <span className={`w-6 h-6 shrink-0 rounded flex items-center justify-center border-2 ${on ? 'bg-[var(--secondary)] border-[var(--secondary)] text-white' : 'bg-[var(--panel)] border-[var(--text)]'}`}>{on && <i className="bi bi-check-lg"></i>}</span>
+                    <span className="flex-grow font-bold text-sm text-[var(--text)] truncate">{g.d || g.name}</span>
+                    <span className="shrink-0 text-xs font-bold text-[var(--text)] opacity-70">{g.count}問</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="border-t-2 border-dashed border-[var(--border)] bg-[var(--panel)] p-2 flex items-center gap-1.5 flex-wrap min-h-[48px]">
+              {selected.length === 0 ? (
+                <span className="font-bold text-xs opacity-70 px-1">コースを えらんでね</span>
+              ) : (
+                <>
+                  <span className="shrink-0 font-black text-xs bg-[var(--text)] text-[var(--panel)] rounded-full px-2.5 py-1">{selected.length}こ / {totalCount}問</span>
+                  {selected.map(name => (
+                    <button key={name} type="button" onClick={() => toggle(name)} aria-label={`${courseLabel(name)} を はずす`} className="min-h-[36px] flex items-center gap-1 max-w-[180px] text-xs font-bold bg-[var(--bg)] border-2 border-[var(--border)] rounded-full pl-2.5 pr-1.5">
+                      <span className="truncate">{groupOf(name)?.d || name}</span><i className="bi bi-x-circle opacity-60"></i>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     // タイムアタックの問題数をえらぶ
     const CountPicker = ({ count, setCount, available }) => (
       <div>
@@ -714,13 +797,14 @@
     );
 
     // かだいリンクのダイアログ（先生むけ）。リンクと QR を出す
-    const KadaiLinkDialog = ({ mode, course, minutes, count, onClose }) => {
+    const KadaiLinkDialog = ({ mode, courses, minutes, count, onClose }) => {
       const [title, setTitle] = useState('');
       const qrRef = useRef(null);
       const [qr, setQr] = useState('loading'); // loading | ok | long | error
-      const problems = PRESET_NAMES.has(course) ? null : StorageAPI.getProblemsByGroup(course);
-      const url = kadaiUrl(encodeKadai({ title, mode, course, minutes, count, problems: problems || [] }));
-      const summary = describeKadai({ mode, course, minutes, count, problems });
+      const linkCourses = courses.filter(n => n !== 'mistakes');
+      const url = kadaiUrl(encodeKadai({ title, mode, courses: linkCourses, minutes, count }));
+      const summary = describeKadai({ mode, courses: linkCourses, minutes, count });
+      const droppedMistakes = linkCourses.length < courses.length;
 
       useEffect(() => {
         const box = qrRef.current; if (!box) return;
@@ -744,6 +828,8 @@
             <h2 className="font-black text-xl flex items-center gap-2"><i className="bi bi-link-45deg text-2xl text-[var(--secondary)]"></i> かだいリンク</h2>
             <p className="text-sm font-bold leading-relaxed">このリンクか QR を こどもに わたすと、ひらいたときに ホームに「かだい」が 出て、ボタン ひとつで この せっていの ゲームが はじまります。</p>
             <div className="text-sm font-black bg-[var(--bg)] border-2 border-[var(--border)] rounded-xl px-3 py-2 break-words">{summary}</div>
+            {linkCourses.length > 1 && <p className="text-xs font-bold opacity-70 break-words">コース: {linkCourses.join('、')}</p>}
+            {droppedMistakes && <p className="text-xs font-bold">にがて克服は、その子の まちがいなので かだいには 入れません。</p>}
             <label className="text-sm font-bold flex flex-col gap-1">
               かだいの なまえ（なくても よい・{KADAI_TITLE_MAX}もじまで）
               <input type="text" value={title} maxLength={KADAI_TITLE_MAX} onChange={e => setTitle(e.target.value)} placeholder="れい: きょうの しゅくだい" className="min-h-[48px] border-2 border-[var(--border)] rounded-xl px-3 font-bold bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--secondary)]" />
@@ -764,7 +850,7 @@
     };
 
     const SingleConfigView = ({ setView, setState, configMode }) => {
-      const [groups, setGroups] = useState([]); const [sel, setSel] = useState(''); const [time, setTime] = useState(3); const [count, setCount] = useState(TA_COUNT_DEFAULT);
+      const [groups, setGroups] = useState([]); const [selected, setSelected] = useState([]); const [time, setTime] = useState(3); const [count, setCount] = useState(TA_COUNT_DEFAULT);
       const [selectedGrade, setSelectedGrade] = useState('すべて');
       const grades = ['すべて', '1年', '2年', '3年', '4年', '5年', '6年', 'その他'];
 
@@ -777,27 +863,18 @@
         return g.name.startsWith(selectedGrade);
       });
 
-      useEffect(() => {
-        if (filteredGroups.length > 0) {
-          if (!filteredGroups.find(g => g.name === sel)) {
-            setSel(filteredGroups[0].name);
-          }
-        } else {
-          setSel('');
-        }
-      }, [selectedGrade, groups]);
 
       const start = () => {
-        if (!sel) return showToast('warning', 'コースを選択してね');
-        const p = sel === 'mistakes' ? StorageAPI.getMistakes() : StorageAPI.getProblemsByGroup(sel);
+        if (!selected.length) return showToast('warning', 'コースを えらんでね');
+        const p = collectProblems(selected);
         if (!p.length) return showToast('error', '問題がありません');
-        setState(buildPlayState(configMode, p, { minutes: time, count }, sel));
+        setState(buildPlayState(configMode, p, { minutes: time, count }, selected));
         setView('game');
       };
       const [kadaiOpen, setKadaiOpen] = useState(false);
       const openKadai = () => {
-        if (!sel) return showToast('warning', 'コースを選択してね');
-        if (sel === 'mistakes') return showToast('error', 'にがて克服は その子の まちがいなので かだいには できません');
+        if (!selected.length) return showToast('warning', 'コースを えらんでね');
+        if (!selected.some(n => n !== 'mistakes')) return showToast('error', 'にがて克服は その子の まちがいなので かだいには できません');
         setKadaiOpen(true);
       };
       return (
@@ -820,29 +897,24 @@
               ))}
             </div>
           </div>
-          <div>
-            <label className="text-xs font-bold opacity-70 mb-1 block">コースをえらぶ</label>
-            <select className="w-full border-2 rounded-xl p-3 font-bold border-[var(--border)] bg-[var(--bg)] text-[var(--text)] outline-none" value={sel} onChange={e => { audioCtrl.playSE('click'); setSel(e.target.value); }}>
-              {filteredGroups.map(g => <option key={g.name} value={g.name}>{g.d || g.name} ({g.count}問)</option>)}
-            </select>
-          </div>
+          <CourseMultiSelect filteredGroups={filteredGroups} allGroups={groups} selected={selected} setSelected={setSelected} />
           {configMode === 'SCORE_ATTACK' && (
             <div>
               <label className="font-bold text-sm flex justify-between mb-2"><span className="opacity-70">制限時間</span><span className="text-[var(--primary)]">{time} 分</span></label>
               <input type="range" min="1" max="10" value={time} onChange={e => setTime(e.target.value)} className="w-full accent-[var(--primary)]" />
             </div>
           )}
-          {configMode === 'TIME_ATTACK' && <CountPicker count={count} setCount={setCount} available={groups.find(g => g.name === sel)?.count} />}
+          {configMode === 'TIME_ATTACK' && <CountPicker count={count} setCount={setCount} available={selected.length ? selected.reduce((sum, n) => sum + (groups.find(g => g.name === n)?.count || 0), 0) : undefined} />}
           <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-xl mt-4 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={start}>スタート！</MotionButton>
           <button type="button" className="w-full min-h-[48px] flex items-center justify-center gap-2 font-bold text-sm text-[var(--text)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--bg)]" onClick={() => { audioCtrl.playSE('click'); openKadai(); }}><i className="bi bi-link-45deg text-lg"></i> 先生むけ：この せっていで かだいリンクを つくる</button>
           <button className="opacity-50 font-bold py-2 hover:opacity-100 transition-opacity" onClick={() => { audioCtrl.playSE('click'); setView('home') }}>もどる</button>
-          {kadaiOpen && <KadaiLinkDialog mode={configMode} course={sel} minutes={time} count={count} onClose={() => setKadaiOpen(false)} />}
+          {kadaiOpen && <KadaiLinkDialog mode={configMode} courses={selected} minutes={time} count={count} onClose={() => setKadaiOpen(false)} />}
         </div>
       );
     };
 
     const HostRoomView = ({ peerState, setPeerState, broadcast, setView, setState, configMode, setConfigMode }) => {
-      const [groups, setGroups] = useState([]); const [sel, setSel] = useState(''); const [time, setTime] = useState(3); const [count, setCount] = useState(TA_COUNT_DEFAULT);
+      const [groups, setGroups] = useState([]); const [selected, setSelected] = useState([]); const [time, setTime] = useState(3); const [count, setCount] = useState(TA_COUNT_DEFAULT);
       const [selectedGrade, setSelectedGrade] = useState('すべて');
       const grades = ['すべて', '1年', '2年', '3年', '4年', '5年', '6年', 'その他'];
 
@@ -854,20 +926,12 @@
         return g.name.startsWith(selectedGrade);
       });
 
-      useEffect(() => {
-        if (filteredGroups.length > 0) {
-          if (!filteredGroups.find(g => g.name === sel)) {
-            setSel(filteredGroups[0].name);
-          }
-        } else {
-          setSel('');
-        }
-      }, [selectedGrade, groups]);
 
       useEffect(() => { if (peerState.hostId && window.QRCode) { document.getElementById('qr').innerHTML=''; new window.QRCode(document.getElementById('qr'), { text: `${window.location.origin}${window.location.pathname}?host=${peerState.hostId}`, width: 120, height: 120, colorDark: "#4A4E69", colorLight: "#ffffff" }); } }, [peerState.hostId]);
       const start = () => {
-        const p = StorageAPI.getProblemsByGroup(sel); if (!p.length) return showToast('error', '問題なし');
-        const conf = buildPlayState(configMode, p, { minutes: time, count }, sel);
+        if (!selected.length) return showToast('warning', 'コースを えらんでね');
+        const p = collectProblems(selected); if (!p.length) return showToast('error', '問題なし');
+        const conf = buildPlayState(configMode, p, { minutes: time, count }, selected);
         setPeerState(ps => { const n = { ...ps, participants: {} }; Object.keys(ps.participants).forEach(k => n.participants[k] = { ...ps.participants[k], score: 0 }); n.participants[ps.hostId] = { id: ps.hostId, name: 'リーダー', score: 0 }; n.connections.forEach(c => c.send({ type: 'participants_update', data: n.participants })); return n; });
         setState(conf); broadcast({ type: 'game_start', data: conf }); setView('game');
       };
@@ -892,16 +956,14 @@
               </div>
             </div>
 
-            <select className="w-full border-2 rounded-xl p-3 font-bold mb-4 bg-[var(--bg)] border-[var(--border)] outline-none" value={sel} onChange={e => setSel(e.target.value)}>
-              {filteredGroups.map(g => <option key={g.name} value={g.name}>{g.name} ({g.count}問)</option>)}
-            </select>
+            <div className="w-full mb-4"><CourseMultiSelect filteredGroups={filteredGroups} allGroups={groups} selected={selected} setSelected={setSelected} /></div>
             {configMode === 'SCORE_ATTACK' && (
               <div className="w-full mb-4">
                 <label className="font-bold text-sm flex justify-between mb-2"><span className="opacity-70">制限時間</span><span className="text-[var(--primary)]">{time} 分</span></label>
                 <input type="range" min="1" max="10" value={time} onChange={e => setTime(e.target.value)} className="w-full accent-[var(--primary)]" />
               </div>
             )}
-            {configMode === 'TIME_ATTACK' && <div className="w-full mb-4"><CountPicker count={count} setCount={setCount} available={groups.find(g => g.name === sel)?.count} /></div>}
+            {configMode === 'TIME_ATTACK' && <div className="w-full mb-4"><CountPicker count={count} setCount={setCount} available={selected.length ? selected.reduce((sum, n) => sum + (groups.find(g => g.name === n)?.count || 0), 0) : undefined} /></div>}
             <div className="w-full bg-[var(--bg)] p-3 rounded-xl border-2 border-[var(--border)] overflow-y-auto max-h-40">
               {Object.values(peerState.participants).map(p => <div key={p.id} className="font-bold border-b border-[var(--border)] py-2 text-sm">{p.name} <span className="float-right text-[var(--primary)]">{p.score}pt</span></div>)}
             </div>
@@ -943,7 +1005,7 @@
       const [qIndex, setQIndex] = useState(0); const [ans, setAns] = useState(''); const [correctCount, setCorrectCount] = useState(0);
       const [startT] = useState(Date.now()); const [currT, setCurrT] = useState(Date.now());
       const elap = Math.floor((currT - startT) / 1000); const rem = Math.max(0, state.timeLimitSec - elap);
-      const [memo, setMemo] = useState(false); const canvasRef = useRef(null); const mistakesRef = useRef([]);
+      const [memo, setMemo] = useState(false); const canvasRef = useRef(null); const mistakesRef = useRef([]); const correctRef = useRef([]);
 
       const isM = peerState && peerState.role;
       const top3 = isM ? Object.values(peerState.participants).sort((a,b)=>b.score-a.score).slice(0,3) : [];
@@ -959,7 +1021,8 @@
 
       const finish = useCallback(() => {
         if (mistakesRef.current.length > 0) StorageAPI.addMistakes(mistakesRef.current);
-        if (state.courseName === 'にがて克服') StorageAPI.removeMistakes(state.problemSet.filter(p => !mistakesRef.current.some(m => m.q === p.q)));
+        // にがて克服をえらんだときは、正解した問題をにがて克服からはずす（まちがえた問題は残す）
+        if ((state.courseNames || []).includes('mistakes')) StorageAPI.removeMistakes(correctRef.current.filter(q => !mistakesRef.current.some(m => m.q === q.q)));
         let n = { ...stats }; const sec = Number(((Date.now() - startT) / 1000).toFixed(1));
         
         let gameScore = score;
@@ -996,7 +1059,7 @@
           const nc = combo + 1; audioCtrl.playSE('correct'); if (nc > 1) audioCtrl.playSE('combo', nc);
           if (nc % 10 === 0) triggerConfetti({ particleCount: 50, spread: 60, origin: { y: 0.8 }, zIndex: 9999 });
           setScore(s => s + 100 + (combo * 10)); setCombo(nc); setMaxCombo(m => Math.max(m, nc)); setCorrectCount(c => c + 1);
-          setAns(''); canvasRef.current?.clear();
+          setAns(''); canvasRef.current?.clear(); correctRef.current.push({ q: q.q });
           if (state.gameMode === 'TIME_ATTACK' && correctCount + 1 >= state.problemSet.length) setTimeout(finish, 500);
           else setQIndex(i => (i + 1) % state.problemSet.length);
         } else {
@@ -1221,9 +1284,9 @@
       const startKadai = () => {
         const k = KadaiStore.get();
         if (!k) { setKadai(null); return showToast('error', 'かだいが 見つかりません'); }
-        const p = k.problems || StorageAPI.getProblemsByGroup(k.course);
+        const p = k.courses.flatMap(n => k.custom[n] || StorageAPI.getProblemsByGroup(n));
         if (!p.length) return showToast('error', '問題がありません');
-        setState(buildPlayState(k.mode, p, { minutes: k.minutes, count: k.count }, k.course, { kadaiId: k.id }));
+        setState(buildPlayState(k.mode, p, { minutes: k.minutes, count: k.count }, k.courses, { kadaiId: k.id }));
         setView('game');
       };
       const closeKadai = () => {
