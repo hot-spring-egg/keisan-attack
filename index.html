@@ -27,6 +27,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- カルク（Qalc2）から取りこんだ問題（tools/import-qalc-problems.mjs で作る） -->
+  <script src="qalc-problems.js"></script>
 
   <style>
     body { 
@@ -189,10 +191,15 @@
     // ==========================================
     // 2. 問題の自動生成ジェネレーター
     // ==========================================
+    // 乱数は種つき（mulberry32）。どの端末で何度ひらいても同じ問題になるので、端末に保存しなくてよい。
+    // 種を変えると全員の問題の数字が入れかわる。理由なく変えないこと
+    const PRESET_SEED = 20261118;
+    const seededRandom = (seed) => { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; };
     const generateDynamicProblems = () => {
       const p = {};
       const add = (g, q, a) => { if(!p[g]) p[g]=[]; p[g].push({q: String(q), a: String(a).split('|')}); };
-      const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+      const rnd = seededRandom(PRESET_SEED);
+      const rand = (min, max) => Math.floor(rnd() * (max - min + 1)) + min;
       const gcd = (x, y) => y === 0 ? x : gcd(y, x % y);
 
       // 1年生
@@ -293,7 +300,33 @@
       return pool.slice(0, 3).map(m => ({ ...m, current: 0, claimed: false }));
     };
 
-    const normalizeStr = (str) => String(str).replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0)-0xFEE0)).replace(/\s+/g, '');
+    // 答えを比べる前にそろえる（カルクと同じ）。全角の数字・記号、位取りの「,」、「.5」のような 0 のはぶきもそろえる
+    const FULLWIDTH_SIGNS = { '．': '.', '／': '/', '－': '-', '−': '-', '‐': '-', '（': '(', '）': ')' };
+    const normalizeStr = (str) => String(str)
+      .replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0))
+      .replace(/[．／－−‐（）]/g, s => FULLWIDTH_SIGNS[s])
+      .replace(/(\d)[,，](?=\d)/g, '$1')
+      .replace(/\s+/g, '')
+      .replace(/^(-?)\./, (_, sign) => `${sign}0.`);
+
+    // ==========================================
+    // プリセットのコース（ケイサンアタックの生成問題 ＋ カルクの問題）
+    // ==========================================
+    // 同じ名前のコースはカルクのものを使う。学年ごとにまとめ、学年の中はカルクの並び → ケイサンアタックだけのもの
+    const PRESET_PROBLEMS = (() => {
+      const own = generateDynamicProblems();
+      const qalc = {};
+      for (const [name, rows] of Object.entries(window.QALC_PROBLEMS || {})) {
+        qalc[name] = rows.map(r => { const [q, ...a] = String(r).split('|'); return { q, a }; });
+      }
+      const grade = (n) => { const m = n.match(/^([1-6])年/); return m ? Number(m[1]) : 7; };
+      const names = [...Object.keys(qalc), ...Object.keys(own).filter(n => !qalc[n])];
+      const order = new Map(names.map((n, i) => [n, i]));
+      names.sort((a, b) => grade(a) - grade(b) || order.get(a) - order.get(b));
+      const out = {};
+      for (const n of names) out[n] = Object.freeze(qalc[n] || own[n]);
+      return Object.freeze(out);
+    })();
 
     const StorageAPI = {
       safeGet: (key, fallback = null) => { try { const v = window.localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } },
@@ -346,20 +379,23 @@
         let m = StorageAPI.getMistakes(); const cSet = new Set(correctQs.map(q => q.q));
         StorageAPI.safeSet('qalc_mistakes', m.filter(x => !cSet.has(x.q)));
       },
-      getRawData: () => {
-        let data = StorageAPI.safeGet('qalc_problems', {});
-        const defaults = generateDynamicProblems();
-        let updated = false;
-        for (const [key, list] of Object.entries(defaults)) {
-          if (!data[key]) { data[key] = list; updated = true; }
+      // 端末に保存するのは、先生が追加したコースだけ。プリセットは毎回ここで作る（どの端末でも同じ中身）。
+      // 以前はプリセットも qalc_problems に保存していた。プリセットと同じ名前のものは古い写しなので捨てる
+      getCustomData: () => {
+        const raw = StorageAPI.safeGet('qalc_problems', {});
+        const data = {}; let stale = false;
+        for (const [k, v] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+          if (PRESET_PROBLEMS[k] || !Array.isArray(v)) stale = true; else data[k] = v;
         }
-        if (updated || !Object.keys(data).length) StorageAPI.safeSet('qalc_problems', data);
-        return Object.keys(data).length ? data : defaults;
+        if (stale) StorageAPI.safeSet('qalc_problems', data);
+        return data;
       },
-      getProblemGroups: () => Object.keys(StorageAPI.getRawData()).map(key => ({ name: key, count: StorageAPI.getRawData()[key].length })),
-      getProblemsByGroup: (name) => StorageAPI.getRawData()[name] || [],
-      saveProblemSet: (name, problems) => { const data = StorageAPI.getRawData(); data[name] = problems; return StorageAPI.safeSet('qalc_problems', data); },
-      deleteProblemGroup: (name) => { const data = StorageAPI.getRawData(); delete data[name]; return StorageAPI.safeSet('qalc_problems', data); },
+      getRawData: () => ({ ...PRESET_PROBLEMS, ...StorageAPI.getCustomData() }),
+      getProblemGroups: () => Object.entries(StorageAPI.getRawData()).map(([name, list]) => ({ name, count: list.length })),
+      getProblemsByGroup: (name) => PRESET_PROBLEMS[name] || StorageAPI.getCustomData()[name] || [],
+      isPreset: (name) => !!PRESET_PROBLEMS[name],
+      saveProblemSet: (name, problems) => { const data = StorageAPI.getCustomData(); data[name] = problems; return StorageAPI.safeSet('qalc_problems', data); },
+      deleteProblemGroup: (name) => { const data = StorageAPI.getCustomData(); delete data[name]; return StorageAPI.safeSet('qalc_problems', data); },
       encodeCourse: (name, probs) => btoa(encodeURIComponent(JSON.stringify({ n: name, p: probs.map(p => `${p.q},${p.a.join('|')}`).join(';') }))),
       decodeCourse: (code) => { try { const d = JSON.parse(decodeURIComponent(atob(code))); return { name: d.n, problems: d.p.split(';').map(s => { const [q, a] = s.split(','); return { q, a: a.split('|') }; }) }; } catch (e) { return null; } }
     };
@@ -381,7 +417,7 @@
     const KADAI_QR_MAX = 1200; // これより長い URL は QR にすると細かすぎて読みとりにくい
     const KADAI_STORE_KEY = 'keisan_kadai';
 
-    const PRESET_NAMES = new Set(Object.keys(generateDynamicProblems()));
+    const PRESET_NAMES = new Set(Object.keys(PRESET_PROBLEMS));
     const kadaiClean = (v, max) => (typeof v === 'string' ? v.replace(/\p{Cc}/gu, ' ').trim().slice(0, max) : '');
     const kadaiMinutes = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.min(10, Math.max(1, Math.round(n))) : 3; };
 
@@ -972,7 +1008,7 @@
               <div className="flex justify-between font-black text-2xl mb-2 opacity-80"><span className={state.gameMode==='SCORE_ATTACK'&&rem<=10?'text-red-500 animate-pulse':''}><i className="bi bi-clock"></i> {Math.floor(dSec/60)}:{(dSec%60).toString().padStart(2,'0')}</span><span className="text-[var(--primary)]">{state.gameMode==='TIME_ATTACK'?`${correctCount}/${state.problemSet.length}問`:state.gameMode==='SUDDEN_DEATH'?`${correctCount}問`:`${score}pt`}</span></div>
               <div className="flex-grow flex flex-col justify-center items-center relative min-h-[120px]">
                 {combo > 1 && <div className="absolute top-0 bg-[var(--accent)] px-4 py-1 rounded-full font-black text-sm border-2 border-white shadow-sm text-white">{combo} COMBO!</div>}
-                <div className="text-4xl sm:text-5xl md:text-6xl font-black break-words w-full text-center leading-tight text-[var(--text)] tracking-wider"><MathText text={q.q} /></div>
+                <div className={`${q.q.length > 24 ? 'text-2xl sm:text-3xl md:text-4xl leading-relaxed' : q.q.length > 12 ? 'text-3xl sm:text-4xl md:text-5xl leading-tight' : 'text-4xl sm:text-5xl md:text-6xl leading-tight tracking-wider'} font-black break-words w-full text-center text-[var(--text)]`}><MathText text={q.q} /></div>
               </div>
               <div className="h-20 bg-[var(--panel)] border-2 border-[var(--border)] rounded-2xl flex items-center justify-center relative mb-4 shadow-sm">
                 <span className="text-4xl font-black text-[var(--secondary)] tracking-widest">{ans || <span className="opacity-20">?</span>}</span>
@@ -1068,7 +1104,7 @@
                 <span>{g.name} <span className="text-xs opacity-50 ml-1">({g.count}問)</span></span>
                 <div className="flex gap-2">
                   <button className="bg-[var(--bg)] text-[var(--text)] px-3 py-1.5 rounded-lg border border-[var(--border)] hover:bg-[var(--secondary)] hover:text-white transition-colors" onClick={()=>copy(g.name)}><i className="bi bi-share"></i></button>
-                  <button className="bg-red-50 text-[var(--primary)] px-3 py-1.5 rounded-lg border border-red-200 hover:bg-[var(--primary)] hover:text-white transition-colors" onClick={()=>del(g.name)}><i className="bi bi-trash"></i></button>
+                  {!StorageAPI.isPreset(g.name) && <button className="bg-red-50 text-[var(--primary)] px-3 py-1.5 rounded-lg border border-red-200 hover:bg-[var(--primary)] hover:text-white transition-colors" onClick={()=>del(g.name)}><i className="bi bi-trash"></i></button>}
                 </div>
               </div>
             ))}
