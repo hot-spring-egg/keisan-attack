@@ -823,26 +823,26 @@
         <div className="fixed inset-0 z-[9000] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
           {/* 高さが足りない画面（横向きのタブレットなど）では、中身を縮めずにスクロールさせる。
               スクロールする枠そのものを flex にすると、QR の場所が縮んで QR が下の URL 欄に重なる */}
-          <div role="dialog" aria-modal="true" aria-label="かだいリンク" className="card-pop w-full max-w-md max-h-[90dvh] overflow-y-auto text-[var(--text)]" onClick={e => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label="課題リンク" className="card-pop w-full max-w-md max-h-[90dvh] overflow-y-auto text-[var(--text)]" onClick={e => e.stopPropagation()}>
            <div className="p-5 flex flex-col gap-3">
-            <h2 className="font-black text-xl flex items-center gap-2"><i className="bi bi-link-45deg text-2xl text-[var(--secondary)]"></i> かだいリンク</h2>
-            <p className="text-sm font-bold leading-relaxed">このリンクか QR を こどもに わたすと、ひらいたときに ホームに「かだい」が 出て、ボタン ひとつで この せっていの ゲームが はじまります。</p>
+            <h2 className="font-black text-xl flex items-center gap-2"><i className="bi bi-qr-code text-2xl text-[var(--secondary)]"></i> 課題リンク</h2>
+            <p className="text-sm font-bold leading-relaxed">このリンクか QR コードを子どもに渡すと、開いたときにホーム画面に「かだい」が表示され、ボタン一つでこの設定のゲームが始まります。</p>
             <div className="text-sm font-black bg-[var(--bg)] border-2 border-[var(--border)] rounded-xl px-3 py-2 break-words">{summary}</div>
             {linkCourses.length > 1 && <p className="text-xs font-bold opacity-70 break-words">コース: {linkCourses.join('、')}</p>}
-            {droppedMistakes && <p className="text-xs font-bold">にがて克服は、その子の まちがいなので かだいには 入れません。</p>}
+            {droppedMistakes && <p className="text-xs font-bold">「にがて克服」は子どもごとに中身が異なるため、課題には含めません。</p>}
             <label className="text-sm font-bold flex flex-col gap-1">
-              かだいの なまえ（なくても よい・{KADAI_TITLE_MAX}もじまで）
-              <input type="text" value={title} maxLength={KADAI_TITLE_MAX} onChange={e => setTitle(e.target.value)} placeholder="れい: きょうの しゅくだい" className="min-h-[48px] border-2 border-[var(--border)] rounded-xl px-3 font-bold bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--secondary)]" />
+              課題の名前（任意・{KADAI_TITLE_MAX}文字まで）
+              <input type="text" value={title} maxLength={KADAI_TITLE_MAX} onChange={e => setTitle(e.target.value)} placeholder="例：きょうの しゅくだい" className="min-h-[48px] border-2 border-[var(--border)] rounded-xl px-3 font-bold bg-[var(--bg)] text-[var(--text)] outline-none focus:border-[var(--secondary)]" />
             </label>
-            <p className="text-xs font-bold opacity-70">こどもの なまえは 入れないで ください。</p>
+            <p className="text-xs font-bold opacity-70">子どもの名前など、個人が分かる情報は入れないでください。</p>
             <div className="flex flex-col items-center justify-center min-h-[100px] shrink-0">
-              {qr === 'long' && <p className="text-sm font-bold text-center">もんだいが おおいので QR には できません。リンクを コピーして わたしてください。</p>}
-              {qr === 'error' && <p className="text-sm font-bold text-center">QR を 出せませんでした。リンクを コピーして わたしてください。</p>}
-              <div ref={qrRef} role="img" aria-label="かだいリンクの QR コード" className={qr === 'ok' ? 'bg-white p-3 rounded-xl border-2 border-[var(--border)]' : 'hidden'}></div>
+              {qr === 'long' && <p className="text-sm font-bold text-center">問題数が多いため QR コードにできません。リンクをコピーして配布してください。</p>}
+              {qr === 'error' && <p className="text-sm font-bold text-center">QR コードを表示できませんでした。リンクをコピーして配布してください。</p>}
+              <div ref={qrRef} role="img" aria-label="課題リンクの QR コード" className={qr === 'ok' ? 'bg-white p-3 rounded-xl border-2 border-[var(--border)]' : 'hidden'}></div>
             </div>
-            <input type="text" readOnly value={url} aria-label="かだいリンクの URL" onFocus={e => e.target.select()} className="min-h-[48px] w-full border-2 border-[var(--border)] rounded-xl px-3 text-xs font-mono bg-[var(--bg)] text-[var(--text)]" />
-            <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-3 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={() => copyText(url, 'かだいリンクを コピーしました')}><i className="bi bi-clipboard"></i> リンクを コピー</MotionButton>
-            <MotionButton autoFocus className="bg-[var(--bg)] text-[var(--text)] w-full py-3" onClick={onClose}>とじる</MotionButton>
+            <input type="text" readOnly value={url} aria-label="課題リンクの URL" onFocus={e => e.target.select()} className="min-h-[48px] w-full border-2 border-[var(--border)] rounded-xl px-3 text-xs font-mono bg-[var(--bg)] text-[var(--text)]" />
+            <MotionButton className="bg-[var(--secondary)] text-[var(--panel)] w-full py-3 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={() => copyText(url, '課題リンクをコピーしました')}><i className="bi bi-clipboard"></i> リンクをコピー</MotionButton>
+            <MotionButton autoFocus className="bg-[var(--bg)] text-[var(--text)] w-full py-3" onClick={onClose}>閉じる</MotionButton>
            </div>
           </div>
         </div>
@@ -873,8 +873,8 @@
       };
       const [kadaiOpen, setKadaiOpen] = useState(false);
       const openKadai = () => {
-        if (!selected.length) return showToast('warning', 'コースを えらんでね');
-        if (!selected.some(n => n !== 'mistakes')) return showToast('error', 'にがて克服は その子の まちがいなので かだいには できません');
+        if (!selected.length) return showToast('warning', 'コースを選んでください');
+        if (!selected.some(n => n !== 'mistakes')) return showToast('error', '「にがて克服」は子どもごとに中身が異なるため、課題にできません');
         setKadaiOpen(true);
       };
       return (
@@ -906,7 +906,18 @@
           )}
           {configMode === 'TIME_ATTACK' && <CountPicker count={count} setCount={setCount} available={selected.length ? selected.reduce((sum, n) => sum + (groups.find(g => g.name === n)?.count || 0), 0) : undefined} />}
           <MotionButton className="bg-[var(--primary)] text-[var(--panel)] w-full py-4 text-xl mt-4 border-none shadow-[0_4px_0_rgba(0,0,0,0.1)]" onClick={start}>スタート！</MotionButton>
-          <button type="button" className="w-full min-h-[48px] flex items-center justify-center gap-2 font-bold text-sm text-[var(--text)] border-2 border-dashed border-[var(--border)] rounded-xl bg-[var(--bg)]" onClick={() => { audioCtrl.playSE('click'); openKadai(); }}><i className="bi bi-link-45deg text-lg"></i> 先生むけ：この せっていで かだいリンクを つくる</button>
+          {/* 先生だけが使うボタンなので、ふつうの漢字で書く（子どもが見る画面はひらがなのまま） */}
+          <button type="button" className="group w-full min-h-[64px] flex items-center gap-3 p-3 text-left text-[var(--text)] border-2 border-[var(--border)] rounded-2xl bg-[var(--panel)] shadow-[0_3px_0_var(--border)] hover:border-[var(--secondary)] active:translate-y-[2px] active:shadow-none transition-all" onClick={() => { audioCtrl.playSE('click'); openKadai(); }}>
+            <span className="shrink-0 w-11 h-11 rounded-xl bg-[var(--secondary)] text-white flex items-center justify-center text-2xl"><i className="bi bi-qr-code"></i></span>
+            <span className="flex-grow min-w-0 flex flex-col">
+              <span className="flex items-center gap-2 flex-wrap">
+                <span className="font-black text-base">課題リンクを作る</span>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-[var(--bg)] border border-[var(--border)]">先生用</span>
+              </span>
+              <span className="text-xs font-bold opacity-70">この設定を URL・QR コードで配布</span>
+            </span>
+            <i className="bi bi-chevron-right shrink-0 text-lg opacity-50 group-hover:opacity-100 transition-opacity"></i>
+          </button>
           <button className="opacity-50 font-bold py-2 hover:opacity-100 transition-opacity" onClick={() => { audioCtrl.playSE('click'); setView('home') }}>もどる</button>
           {kadaiOpen && <KadaiLinkDialog mode={configMode} courses={selected} minutes={time} count={count} onClose={() => setKadaiOpen(false)} />}
         </div>
